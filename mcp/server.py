@@ -168,11 +168,11 @@ def generate(scope: str = "single") -> str:
 
 
 @mcp.tool()
-def get_image(image_id: str, output_path: str, region_id: str | None = None) -> str:
-    """把生成结果保存为本地文件。image_id 必填；region_id 给定时取该选区补丁，否则取整图结果。无结果时提示先 generate。"""
+def get_full_image(image_id: str, output_path: str) -> str:
+    """把整图最终结果保存为本地文件并返回路径。标准区域模式返回"原图+补丁拼合"的最终结果；反向遮罩返回拼合整图。无结果时提示先 generate。"""
     if not _ensure_bridge():
         return _err("桥接服务不可达")
-    res = _cmd("get_image", {"image_id": image_id, "region_id": region_id})
+    res = _cmd("get_full_image", {"image_id": image_id})
     if not res.get("ok"):
         return _err(str(res.get("error")))
     result = res.get("result") or {}
@@ -185,7 +185,28 @@ def get_image(image_id: str, output_path: str, region_id: str | None = None) -> 
         out.write_bytes(base64.b64decode(b64))
     except Exception as e:
         return _err(f"写文件失败: {e}")
-    return _ok({"path": str(out), "mime": result.get("mime", "image/png")})
+    return _ok({"path": str(out), "mime": result.get("mime", "image/png"), "kind": result.get("kind", "full")})
+
+
+@mcp.tool()
+def get_region_patch(image_id: str, region_id: str, output_path: str) -> str:
+    """把某个选区的补丁切片保存为本地文件并返回路径。注意：返回的是切片（kind:patch），不是整页，禁止覆盖原图路径；先落临时文件目检后再决定。"""
+    if not _ensure_bridge():
+        return _err("桥接服务不可达")
+    res = _cmd("get_region_patch", {"image_id": image_id, "region_id": region_id})
+    if not res.get("ok"):
+        return _err(str(res.get("error")))
+    result = res.get("result") or {}
+    b64 = result.get("base64")
+    if not b64:
+        return _err("未获得补丁数据（可能尚无结果，请先 generate）")
+    try:
+        out = Path(output_path).expanduser()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(base64.b64decode(b64))
+    except Exception as e:
+        return _err(f"写文件失败: {e}")
+    return _ok({"path": str(out), "mime": result.get("mime", "image/png"), "kind": result.get("kind", "patch")})
 
 
 def main():

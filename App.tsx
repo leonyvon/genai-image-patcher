@@ -210,23 +210,35 @@ export default function App() {
       handleProcess(scope === 'all');
       return { ok: true };
     },
-    get_image: async ({ image_id, region_id }) => {
+    get_full_image: async ({ image_id }) => {
       const img = images.find((i) => i.id === image_id);
       if (!img) return { ok: false, error: `image not found: ${image_id}` };
       let url: string | null = null;
-      if (region_id) {
-        url = img.regions.find((r) => r.id === region_id)?.processedImageUrl ?? null;
-        if (!url && config.useInvertedMasking) {
-          return { ok: false, error: 'reverse-masking mode has no per-region patch — call get_image without region_id for the full image' };
-        }
+      const hasPatches = img.regions.some((r) => r.status === 'completed' && !!r.processedImageUrl);
+      if (hasPatches) {
+        // 标准区域模式：最终结果是"原图+补丁拼合"，经 getStitchedUrl 按需计算（缓存）
+        url = await getStitchedUrl(img);
       } else {
+        // 反向遮罩 / 无补丁路径：取已存结果
         url = img.finalResultUrl ?? img.fullAiResultUrl ?? null;
       }
       if (!url) return { ok: false, error: 'no result available yet — run generate first' };
       const dataUrl = await urlToBase64(url);
       const [header, base64] = dataUrl.split(',');
       const mime = header.match(/:(.*?);/)?.[1] || 'image/png';
-      return { ok: true, result: { mime, base64 } };
+      return { ok: true, result: { mime, base64, kind: 'full' } };
+    },
+    get_region_patch: async ({ image_id, region_id }) => {
+      const img = images.find((i) => i.id === image_id);
+      if (!img) return { ok: false, error: `image not found: ${image_id}` };
+      const region = img.regions.find((r) => r.id === region_id);
+      if (!region) return { ok: false, error: `region not found: ${region_id}` };
+      const url = region.processedImageUrl ?? null;
+      if (!url) return { ok: false, error: 'no patch result for this region yet — run generate first' };
+      const dataUrl = await urlToBase64(url);
+      const [header, base64] = dataUrl.split(',');
+      const mime = header.match(/:(.*?);/)?.[1] || 'image/png';
+      return { ok: true, result: { mime, base64, kind: 'patch' } };
     },
   };
 
