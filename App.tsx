@@ -4,7 +4,7 @@ import { Region, ProcessingStep, AppConfig, RestoreBox } from './types';
 import Sidebar from './components/Sidebar';
 import EditorCanvas from './components/EditorCanvas';
 import type { TextObject } from './components/PatchEditor';
-import { loadImage, cropRegion, stitchImage, createInvertedMultiMaskedFullImage, extractCropFromFullImage, stitchImageInverted, releaseObjectURL } from './services/imageUtils';
+import { loadImage, cropRegion, stitchImage, createInvertedMultiMaskedFullImage, extractCropFromFullImage, stitchImageInverted, releaseObjectURL, compressImageToTargetSize, urlToBase64 } from './services/imageUtils';
 import { fetchOpenAIModels } from './services/aiService';
 import { recognizeText } from './services/detectionService';
 import { t } from './services/translations';
@@ -56,6 +56,30 @@ export default function App() {
       handleStop,
       handleAutoDetect
   } = useImageProcessor(images, updateImage, updateAllImages, config, selectedImage);
+
+  // grsai 全局参考图：图库图片标记/取消标记。标记时压缩并持久化到 config。
+  const handleToggleReference = useCallback(async (imageId: string) => {
+    const img = images.find(i => i.id === imageId);
+    if (!img) return;
+
+    if (img.isReference && img.referenceBase64) {
+      // 取消标记：从配置移除对应条目，清除图片标志
+      setConfig(prev => ({ ...prev, grsaiReferenceImages: prev.grsaiReferenceImages.filter(b => b !== img.referenceBase64) }));
+      updateImage(imageId, i => ({ ...i, isReference: false, referenceBase64: undefined }));
+      return;
+    }
+
+    // 标记：压缩 → base64 → 写入配置
+    try {
+      const compressed = await compressImageToTargetSize(img.originalUrl, { targetSizeKB: 200, maxDimension: 1024 });
+      const b64 = await urlToBase64(compressed);
+      URL.revokeObjectURL(compressed);
+      setConfig(prev => ({ ...prev, grsaiReferenceImages: [...prev.grsaiReferenceImages, b64] }));
+      updateImage(imageId, i => ({ ...i, isReference: true, referenceBase64: b64 }));
+    } catch (e) {
+      console.warn('Failed to add reference image:', e);
+    }
+  }, [images, setConfig, updateImage]);
 
   const [isDragging, setIsDragging] = useState(false);
   const [showGlobalSettings, setShowGlobalSettings] = useState(false);
@@ -536,6 +560,7 @@ export default function App() {
         onDeleteImage={handleDeleteImage}
         onClearAllImages={handleClearAllImages} 
         onToggleSkip={handleToggleSkip}
+        onToggleReference={handleToggleReference}
         onAutoDetect={handleAutoDetect}
         isDetecting={isDetecting}
         onOpenEditor={handleOpenEditor}

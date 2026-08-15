@@ -29,6 +29,7 @@ interface SidebarProps {
   onDeleteImage: (imageId: string) => void;
   onClearAllImages: () => void;
   onToggleSkip: (imageId: string) => void;
+  onToggleReference: (imageId: string) => void;
   onAutoDetect: (scope: 'current' | 'all') => void;
   isDetecting: boolean;
   onOpenEditor: (imageId: string, regionId: string) => void;
@@ -71,6 +72,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onDeleteImage,
   onClearAllImages,
   onToggleSkip,
+  onToggleReference,
   onAutoDetect,
   isDetecting,
   onOpenEditor,
@@ -422,7 +424,15 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
                              ) : (
                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path></svg>
-                             )}
+                              )}
+                           </button>
+
+                          <button 
+                             onClick={(e) => { e.stopPropagation(); onToggleReference(img.id); }}
+                             className={`absolute top-1 left-[24px] p-1 rounded-sm shadow-sm transition-all z-10 ${img.isReference ? 'bg-amber-400 text-white' : 'bg-skin-surface/90 text-skin-muted hover:text-amber-500 hover:bg-white'}`}
+                             title={img.isReference ? t(lang, 'removeReference') : t(lang, 'useAsReference')}
+                          >
+                             <svg className="w-3 h-3" fill={img.isReference ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118L2.98 10.1c-.783-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>
                           </button>
 
                           <button 
@@ -432,6 +442,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                           >
                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                           </button>
+
+                          {img.isReference && img.referenceBase64 && config.grsaiReferenceImages.indexOf(img.referenceBase64) >= 0 && (
+                             <span className="absolute bottom-1 left-1 px-1 rounded bg-amber-500 text-white text-[9px] font-bold z-10 shadow-sm">
+                                [image {config.grsaiReferenceImages.indexOf(img.referenceBase64) + 2}]
+                             </span>
+                          )}
 
                           {(img.regions.some(r => r.status === 'completed') || img.finalResultUrl) && (
                              <div className="absolute bottom-1 right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm border border-white z-10" title="Completed"></div>
