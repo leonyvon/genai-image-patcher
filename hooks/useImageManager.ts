@@ -120,7 +120,10 @@ export function useImageManager(performanceMode: PerformanceMode) {
   }, [selectedImage?.regions, viewMode]);
 
   const addImageFiles = async (fileList: File[]) => {
-    const imageFiles = fileList.filter(f => f.type.startsWith('image/') && !f.name.startsWith('.'));
+    // Accept image MIME types OR files with an empty/unknown type — some
+    // environments don't populate File.type, and a strict MIME filter would
+    // silently drop them. Real image validity is enforced by loadImage below.
+    const imageFiles = fileList.filter(f => !f.name.startsWith('.') && (f.type.startsWith('image/') || !f.type));
 
     if (imageFiles.length === 0) return;
 

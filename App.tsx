@@ -279,11 +279,15 @@ export default function App() {
 
   // --- Handlers ---
   const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+    // Materialize the file list into a plain array BEFORE resetting input.value.
+    // input.files is a live view: clearing value empties a captured FileList
+    // reference, which silently skipped the upload entirely.
+    const inputFiles = e.target.files;
+    const files = inputFiles ? Array.from<File>(inputFiles) : [];
     // Reset value first so re-selecting the same file(s) still fires onChange.
     e.target.value = '';
-    if (files && files.length > 0) {
-      await addImageFiles(Array.from(files));
+    if (files.length > 0) {
+      await addImageFiles(files);
     }
   }, [addImageFiles]);
 
