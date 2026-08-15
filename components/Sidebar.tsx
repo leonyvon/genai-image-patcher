@@ -279,6 +279,10 @@ const Sidebar: React.FC<SidebarProps> = ({
       <div className="p-5 border-b border-skin-border bg-skin-surface relative flex flex-col gap-4">
         {/* Header Buttons */}
         <div className="absolute top-3 right-3 flex gap-1">
+             <span
+               className={`self-center w-2 h-2 rounded-full transition-colors ${bridgeConnected ? 'bg-emerald-500' : 'bg-zinc-400'}`}
+               title={bridgeConnected ? 'MCP Bridge connected (127.0.0.1:3100)' : 'MCP Bridge disconnected'}
+             />
              <button
                onClick={onOpenGlobalSettings}
                className="p-2 text-skin-muted hover:text-skin-primary hover:bg-skin-fill rounded-full transition-all"
