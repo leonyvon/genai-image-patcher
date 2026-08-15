@@ -284,7 +284,7 @@ export function useImageProcessor(
                     console.error(`Failed to process regions for ${imageSnapshot.file.name}:`, err);
                     setErrorMsg(err?.message || "Unknown error");
                     regionsToProcess.forEach(r => {
-                        regionsMap.set(r.id, { ...r, status: 'failed' as const });
+                        regionsMap.set(r.id, { ...r, status: 'failed' as const, errorMessage: (err as Error)?.message || String(err) });
                     });
                     updateImage(imageSnapshot.id, img => ({ ...img, regions: Array.from(regionsMap.values()) }));
                 }
@@ -487,7 +487,7 @@ export function useImageProcessor(
                 if (paddedUrl) releaseObjectURL(paddedUrl);
                 if (croppedUrl) releaseObjectURL(croppedUrl);
 
-                const failedRegion = { ...region, status: 'failed' as const };
+                const failedRegion = { ...region, status: 'failed' as const, errorMessage: (err as Error)?.message || String(err) };
                 regionsMap.set(region.id, failedRegion);
                 updateImage(imageSnapshot.id, img => ({ ...img, regions: Array.from(regionsMap.values()) }));
             } finally {

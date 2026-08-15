@@ -130,21 +130,29 @@ export default function App() {
   // --- MCP Bridge ---
   // 快照不含 bridgeConnected 字段（已从 BridgeStateSnapshot 类型移除）；
   // 连接状态由桥接 /health 的 appConnected 提供，Agent 经 get_status 读取。
+  const [generationSeq, setGenerationSeq] = useState(0);
   const bridgeSnapshot = useMemo<BridgeStateSnapshot | null>(() => ({
     processingState,
     selectedImageId,
+    generationSeq,
+    updatedAt: Date.now(),
     images: images.map((img) => ({
       id: img.id,
       name: img.file.name,
       width: img.originalWidth,
       height: img.originalHeight,
       isReference: isEffectiveReference(img, config.grsaiReferenceImages),
+      referenceOrder: (() => {
+        const idx = config.grsaiReferenceImages.indexOf(img.referenceBase64 || '');
+        return idx >= 0 ? idx + 1 : null; // [image N] = referenceOrder + 1
+      })(),
       hasResult: !!img.finalResultUrl || img.regions.some((r) => !!r.processedImageUrl),
       regions: img.regions.map((r) => ({
         id: r.id,
         status: r.status,
         x: r.x, y: r.y, width: r.width, height: r.height,
         customPrompt: r.customPrompt ?? null,
+        errorMessage: r.errorMessage ?? null,
         hasResult: !!r.processedImageUrl,
       })),
     })),
@@ -155,7 +163,7 @@ export default function App() {
       processingMode: config.processingMode,
       referenceCount: config.grsaiReferenceImages.length,
     },
-  }), [images, config, processingState, selectedImageId]);
+  }), [images, config, processingState, selectedImageId, generationSeq]);
 
   const bridgeHandlers: BridgeHandlerMap = {
     upload: async ({ files }) => {
@@ -207,8 +215,22 @@ export default function App() {
     },
     generate: async ({ scope }) => {
       if (scope !== 'single' && scope !== 'all') return { ok: false, error: "scope must be 'single' or 'all'" };
+      // 镜像 useImageProcessor 的启动判定：无 pending/failed 选区时 handleProcess 会静默 no-op，
+      // 这里显式暴露，避免 agent 把旧 DONE 误判为本次已执行。
+      const hasWork = scope === 'all'
+        ? images.some((img) => !img.isSkipped && !isEffectiveReference(img, config.grsaiReferenceImages) && (
+            img.regions.some((r) => (r.status === 'pending' || r.status === 'failed') && !r.contextOnly) ||
+            (config.processFullImageIfNoRegions && img.regions.length === 0)))
+        : !!selectedImage && (
+            selectedImage.regions.some((r) => (r.status === 'pending' || r.status === 'failed') && !r.contextOnly) ||
+            (config.processFullImageIfNoRegions && selectedImage.regions.length === 0));
+      if (!hasWork) {
+        return { ok: true, result: { noop: true, reason: 'no pending regions to process — regions are already completed; reset a region or draw a new one first' } };
+      }
+      const seq = generationSeq + 1;
+      setGenerationSeq(seq);
       handleProcess(scope === 'all');
-      return { ok: true };
+      return { ok: true, result: { generationSeq: seq } };
     },
     get_full_image: async ({ image_id }) => {
       const img = images.find((i) => i.id === image_id);

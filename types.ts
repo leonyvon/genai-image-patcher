@@ -29,6 +29,7 @@ export interface Region {
   isOcrLoading?: boolean; // Loading state for OCR
   restoreBoxes?: RestoreBox[]; // Box-based restore regions (框选还原)
   restoreMaskUrl?: string; // Brush-based restore mask Object URL (涂抹还原), alpha=1=processed, 0=original
+  errorMessage?: string; // 最近一次失败的原因（供 MCP 快照与 UI 诊断）
 }
 
 export interface ImageHistoryState {

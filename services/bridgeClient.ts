@@ -5,6 +5,7 @@ export interface BridgeRegionInfo {
   status: string;
   x: number; y: number; width: number; height: number;
   customPrompt: string | null;
+  errorMessage: string | null;
   hasResult: boolean;
 }
 
@@ -14,6 +15,7 @@ export interface BridgeImageInfo {
   width: number;
   height: number;
   isReference: boolean;
+  referenceOrder: number | null;
   hasResult: boolean;
   regions: BridgeRegionInfo[];
 }
@@ -21,6 +23,8 @@ export interface BridgeImageInfo {
 export interface BridgeStateSnapshot {
   processingState: string;
   selectedImageId: string | null;
+  generationSeq: number;
+  updatedAt: number;
   images: BridgeImageInfo[];
   config: {
     provider: string;

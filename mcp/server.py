@@ -151,7 +151,7 @@ def unmark_reference(image_id: str) -> str:
 
 @mcp.tool()
 def set_prompt(prompt: str, image_id: str | None = None, region_id: str | None = None) -> str:
-    """设置提示词。缺省=全局提示词；给 image_id=该图片提示词；给 image_id+region_id=该选区提示词。"""
+    """设置提示词。缺省=全局；给 image_id=该图片；给 image_id+region_id=该选区。注意：每次调用都是**整体覆盖**该作用域的完整提示词（含历史翻译缓存块），不是追加。"""
     if not _ensure_bridge():
         return _err("桥接服务不可达")
     res = _cmd("set_prompt", {"prompt": prompt, "image_id": image_id, "region_id": region_id})
