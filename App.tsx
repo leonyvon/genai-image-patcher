@@ -4,7 +4,7 @@ import { Region, ProcessingStep, AppConfig, RestoreBox } from './types';
 import Sidebar from './components/Sidebar';
 import EditorCanvas from './components/EditorCanvas';
 import type { TextObject } from './components/PatchEditor';
-import { loadImage, cropRegion, stitchImage, createInvertedMultiMaskedFullImage, extractCropFromFullImage, stitchImageInverted, releaseObjectURL, compressImageToTargetSize, urlToBase64, isEffectiveReference } from './services/imageUtils';
+import { loadImage, cropRegion, stitchImage, createInvertedMultiMaskedFullImage, extractCropFromFullImage, stitchImageInverted, releaseObjectURL, compressImageToTargetSize, urlToBase64, isEffectiveReference, flipImageHorizontal } from './services/imageUtils';
 import { fetchOpenAIModels } from './services/aiService';
 import { recognizeText } from './services/detectionService';
 import { t } from './services/translations';
@@ -620,6 +620,45 @@ export default function App() {
       }
   }, [selectedImage, config.useInvertedMasking, handleApplyResultAsOriginal, setErrorMsg]);
 
+  // 选区编辑：水平翻转选区内容。有补丁→翻转补丁；无补丁→裁原图翻转成手动补丁。
+  const handleFlipRegion = useCallback(async (imageId: string, regionId: string) => {
+    const img = images.find((i) => i.id === imageId);
+    if (!img) return;
+    const region = img.regions.find((r) => r.id === regionId);
+    if (!region) return;
+    let cropUrl: string | null = null;
+    try {
+      let sourceUrl: string;
+      if (region.processedImageUrl) {
+        sourceUrl = region.processedImageUrl;
+      } else {
+        const imgEl = await loadImage(img.originalUrl || img.previewUrl);
+        cropUrl = await cropRegion(imgEl, region);
+        sourceUrl = cropUrl;
+      }
+      const flippedUrl = await flipImageHorizontal(sourceUrl);
+      if (cropUrl) releaseObjectURL(cropUrl);
+      if (region.processedImageUrl && region.processedImageUrl !== flippedUrl) {
+        releaseObjectURL(region.processedImageUrl);
+      }
+      updateImage(imageId, (prev) => ({
+        ...prev,
+        regions: prev.regions.map((r) => r.id === regionId ? {
+          ...r,
+          processedImageUrl: flippedUrl,
+          status: 'completed' as const,
+          anchorX: r.x, anchorY: r.y, anchorWidth: r.width, anchorHeight: r.height,
+          restoreBoxes: undefined,
+          restoreMaskUrl: undefined,
+        } : r),
+      }));
+    } catch (e) {
+      if (cropUrl) releaseObjectURL(cropUrl);
+      console.error('Failed to flip region', e);
+      setErrorMsg('Failed to flip region.');
+    }
+  }, [images, updateImage, setErrorMsg]);
+
   // --- REFINEMENT HANDLER (Scroll to adjust box) ---
   const handleAdjustRegion = useCallback(async (imageId: string, regionId: string, isExpand: boolean) => {
       const img = images.find(i => i.id === imageId);
@@ -861,6 +900,7 @@ export default function App() {
                     showOcrButton={config.enableMangaMode && config.enableOCR}
                     showEditorButton={showEditor}
                     onAdjustRegionSize={editorOnAdjustRegionSize}
+                    onFlipRegion={(regionId) => handleFlipRegion(selectedImage.id, regionId)}
                     onInteractionStart={handleInteractionStart}
                     viewMode={viewMode}
                     restoreMode={restoreMode}
