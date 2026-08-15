@@ -79,6 +79,9 @@ const DEFAULT_CONFIG: AppConfig = {
   squareFillMode: 'ratio', // Default to ratio-based crop (no pixel scanning needed)
   geminiApiKey: process.env.API_KEY || '',
   geminiModel: 'gemini-2.5-flash-image', 
+  grsaiApiKey: '',
+  grsaiModel: 'gpt-image-2',
+  grsaiReferenceImages: [],
   processingMode: 'api',
   // Default to localhost for Python backend development
   detectionApiUrl: 'http://localhost:5000/detect',
@@ -214,6 +217,19 @@ export function useConfig() {
         }
         if (typeof migratedConfig.aiPayloadRedrawTargetKB === 'undefined') {
             migratedConfig.aiPayloadRedrawTargetKB = 1500;
+        }
+
+        // Ensure grsai settings exist
+        if (typeof migratedConfig.grsaiApiKey === 'undefined') {
+            migratedConfig.grsaiApiKey = '';
+        }
+        if (typeof migratedConfig.grsaiModel === 'undefined') {
+            migratedConfig.grsaiModel = 'gpt-image-2';
+        }
+
+        // Ensure grsaiReferenceImages exists
+        if (typeof migratedConfig.grsaiReferenceImages === 'undefined') {
+            migratedConfig.grsaiReferenceImages = [];
         }
 
         return migratedConfig;

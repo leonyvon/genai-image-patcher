@@ -57,9 +57,12 @@ export interface UploadedImage {
   // History for Undo/Redo of "Apply as Original"
   history: ImageHistoryState[];
   historyIndex: number;
+  isReference?: boolean; // If true, image is a grsai reference only — excluded from processing and ZIP export
+  /** Compressed base64 data URL stored in config.grsaiReferenceImages (used for badge index and unmarking). */
+  referenceBase64?: string;
 }
 
-export type AiProvider = 'openai' | 'gemini';
+export type AiProvider = 'openai' | 'gemini' | 'grsai';
 
 export type ThemeType = 'light' | 'dark' | 'ocean' | 'rose' | 'forest';
 
@@ -110,6 +113,12 @@ export interface AppConfig {
   // Gemini Specifics
   geminiApiKey: string;
   geminiModel: string;
+
+  // grsai (GPT Image 2) Specifics
+  grsaiApiKey: string;
+  grsaiModel: string;
+  /** Global reference images (compressed base64 data URLs). Sent as images[1..n] on grsai requests; [image 1] is always the region slice. */
+  grsaiReferenceImages: string[];
 
   // Backend Detection Settings (Python)
   detectionApiUrl: string; // e.g. http://localhost:8000/detect
