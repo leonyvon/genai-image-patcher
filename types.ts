@@ -38,6 +38,8 @@ export interface ImageHistoryState {
   width: number;
   height: number;
   fullAiResultUrl?: string; // Added to history
+  /** Full-resolution source for API crops at this history point (undo/redo restores it). */
+  originalUrl?: string;
 }
 
 export interface UploadedImage {

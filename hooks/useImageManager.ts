@@ -151,7 +151,8 @@ export function useImageManager(performanceMode: PerformanceMode) {
             finalResultUrl: undefined,
             width: imgEl.naturalWidth,
             height: imgEl.naturalHeight,
-            fullAiResultUrl: undefined
+            fullAiResultUrl: undefined,
+            originalUrl: originalUrl,
         };
 
         newImages.push({
@@ -266,10 +267,11 @@ export function useImageManager(performanceMode: PerformanceMode) {
       const newState: ImageHistoryState = {
         previewUrl: stitchedUrl,
         regions: [],
-        finalResultUrl: undefined,
+        finalResultUrl: stitchedUrl,
         width: img.originalWidth,
         height: img.originalHeight,
         fullAiResultUrl: undefined,
+        originalUrl: stitchedUrl,
       };
 
       const newHistory = img.history.slice(0, img.historyIndex + 1);
@@ -281,6 +283,7 @@ export function useImageManager(performanceMode: PerformanceMode) {
           releaseObjectURL(evicted.previewUrl);
           releaseObjectURL(evicted.fullAiResultUrl);
           releaseObjectURL(evicted.finalResultUrl);
+          releaseObjectURL(evicted.originalUrl);
           evicted.regions.forEach((r) => {
             releaseObjectURL(r.processedImageUrl);
             releaseObjectURL(r.restoreMaskUrl);
@@ -293,8 +296,9 @@ export function useImageManager(performanceMode: PerformanceMode) {
       return {
         ...img,
         previewUrl: newState.previewUrl,
+        originalUrl: stitchedUrl,
         regions: newState.regions,
-        finalResultUrl: undefined,
+        finalResultUrl: stitchedUrl,
         fullAiResultUrl: undefined,
         history: newHistory,
         historyIndex: newIndex,
@@ -311,6 +315,7 @@ export function useImageManager(performanceMode: PerformanceMode) {
       return {
         ...img,
         previewUrl: prevState.previewUrl,
+        originalUrl: prevState.originalUrl,
         regions: prevState.regions,
         originalWidth: prevState.width,
         originalHeight: prevState.height,
@@ -329,6 +334,7 @@ export function useImageManager(performanceMode: PerformanceMode) {
       return {
         ...img,
         previewUrl: nextState.previewUrl,
+        originalUrl: nextState.originalUrl,
         regions: nextState.regions,
         originalWidth: nextState.width,
         originalHeight: nextState.height,

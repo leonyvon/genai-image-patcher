@@ -299,6 +299,7 @@ export default function App() {
                         fullAiResultUrl: imageDataUrl,
                         finalResultUrl: stitchedUrl,
                         regions: updatedRegions,
+                        originalUrl: img.originalUrl,
                         history: currentHistory
                     };
                 });
@@ -330,6 +331,7 @@ export default function App() {
                         ...img,
                         fullAiResultUrl: imageDataUrl,
                         regions: updatedRegions,
+                        originalUrl: img.originalUrl,
                         history: currentHistory
                     };
                 });
