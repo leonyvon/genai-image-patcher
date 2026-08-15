@@ -3,6 +3,7 @@ import { useState, useRef } from 'react';
 import { AppConfig, ProcessingStep, UploadedImage, Region } from '../types';
 import { loadImage, createMultiMaskedFullImage, createInvertedMultiMaskedFullImage, cropRegion, padImageToSquare, depadImageByRatio, depadImageFromSquare, stitchImageInverted, extractCropFromFullImage, compressImageToTargetSize, PaddingInfo, urlToBase64, base64ToObjectURLAsync, releaseObjectURL, isEffectiveReference } from '../services/imageUtils';
 import { generateRegionEdit, generateTranslation } from '../services/aiService';
+import { playCompletionSound } from '../services/sound';
 import { AsyncSemaphore, runWithConcurrency } from '../services/concurrencyUtils';
 import { t } from '../services/translations';
 import { detectBubbles } from '../services/detectionService';
@@ -528,7 +529,12 @@ export function useImageProcessor(
                     await processSingleImage(img, controller.signal, globalSemaphore);
                 }
             }
-            if (controller.signal.aborted) setErrorMsg(t(config.language, 'stopped_by_user'));
+            if (controller.signal.aborted) {
+                setErrorMsg(t(config.language, 'stopped_by_user'));
+            } else {
+                // 正常完成：播放提示音（浏览器自动播放策略下需用户手势，点击"开始生成"已满足）
+                playCompletionSound();
+            }
             setProcessingState(ProcessingStep.DONE);
         } catch (e: any) {
             if (e.name !== 'AbortError') {
