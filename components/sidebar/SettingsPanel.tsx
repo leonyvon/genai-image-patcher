@@ -54,6 +54,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     >
                         OpenAI / Compatible
                     </button>
+                    <button 
+                        onClick={() => onChange('provider', 'grsai')}
+                        className={`flex-1 py-1.5 text-[10px] rounded-md transition-all font-medium ${config.provider === 'grsai' ? 'bg-skin-surface shadow-sm text-skin-primary' : 'text-skin-muted hover:text-skin-text'}`}
+                    >
+                        grsai
+                    </button>
                 </div>
             </div>
 
@@ -153,6 +159,53 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                             onChange={(e) => onChange('geminiModel', e.target.value)}
                             className="w-full p-2 text-xs border border-skin-border rounded-lg bg-skin-surface focus:border-skin-primary transition-colors focus:ring-1 focus:ring-skin-primary/50"
                         />
+                    </div>
+                </>
+            )}
+
+            {/* grsai Specifics */}
+            {config.provider === 'grsai' && (
+                <>
+                    <div className="animate-in fade-in slide-in-from-top-1">
+                        <label className="text-[10px] uppercase font-bold text-skin-muted mb-1 block">{t(lang, 'apiKey')}</label>
+                        <input 
+                            type="password" 
+                            value={config.grsaiApiKey}
+                            onChange={(e) => onChange('grsaiApiKey', e.target.value)}
+                            className="w-full p-2 text-xs border border-skin-border rounded-lg bg-skin-surface focus:border-skin-primary transition-colors focus:ring-1 focus:ring-skin-primary/50"
+                            placeholder="grsai API Key"
+                        />
+                    </div>
+                    <div className="animate-in fade-in slide-in-from-top-2">
+                        <label className="text-[10px] uppercase font-bold text-skin-muted mb-1 block">{t(lang, 'model')}</label>
+                        <input 
+                            type="text" 
+                            value={config.grsaiModel}
+                            onChange={(e) => onChange('grsaiModel', e.target.value)}
+                            className="w-full p-2 text-xs border border-skin-border rounded-lg bg-skin-surface focus:border-skin-primary transition-colors focus:ring-1 focus:ring-skin-primary/50"
+                            placeholder="gpt-image-2"
+                        />
+                    </div>
+                    <div className="animate-in fade-in slide-in-from-top-3 pt-2 mt-2 border-t border-skin-border/50">
+                        <label className="text-[10px] uppercase font-bold text-skin-muted mb-1 block">Reference Images</label>
+                        <p className="text-[10px] text-skin-muted mb-2 leading-tight">[image 1] is the region slice; references start at [image 2]. Mark images in the gallery with the star to add.</p>
+                        {config.grsaiReferenceImages.length === 0 ? (
+                            <p className="text-[10px] text-skin-muted italic">No reference images yet.</p>
+                        ) : (
+                            <div className="flex flex-wrap gap-2">
+                                {config.grsaiReferenceImages.map((b64, i) => (
+                                    <div key={i} className="relative w-14 h-14 rounded-lg overflow-hidden border border-skin-border bg-skin-fill group">
+                                        <img src={b64} className="w-full h-full object-cover" alt={`reference ${i + 2}`} />
+                                        <span className="absolute bottom-0.5 left-0.5 px-1 rounded bg-amber-500 text-white text-[8px] font-bold">{`[image ${i + 2}]`}</span>
+                                        <button
+                                            onClick={() => onChange('grsaiReferenceImages', config.grsaiReferenceImages.filter((_, idx) => idx !== i))}
+                                            className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[9px] leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                            title="Remove reference"
+                                        >✕</button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 </>
             )}
