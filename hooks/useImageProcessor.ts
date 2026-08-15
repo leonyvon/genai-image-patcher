@@ -63,6 +63,7 @@ export function useImageProcessor(
     const processSingleImage = async (imageSnapshot: UploadedImage, signal: AbortSignal, globalSemaphore: AsyncSemaphore) => {
         if (signal.aborted) return;
         if (imageSnapshot.isSkipped) return;
+        if (imageSnapshot.isReference) return;
 
         const regionsMap = new Map<string, Region>();
         imageSnapshot.regions.forEach(r => regionsMap.set(r.id, r));
@@ -279,6 +280,8 @@ export function useImageProcessor(
                 }
             } catch (err: any) {
                 if (err.name !== 'AbortError') {
+                    console.error(`Failed to process regions for ${imageSnapshot.file.name}:`, err);
+                    setErrorMsg(err?.message || "Unknown error");
                     regionsToProcess.forEach(r => {
                         regionsMap.set(r.id, { ...r, status: 'failed' as const });
                     });
@@ -474,6 +477,8 @@ export function useImageProcessor(
                 updateImage(imageSnapshot.id, img => ({ ...img, regions: currentAllRegions }));
             } catch (err: any) {
                 if (err.name === 'AbortError') return;
+                console.error(`Failed to process region ${region.id}:`, err);
+                setErrorMsg(err?.message || "Unknown error");
                 // Clean up any URLs we created in this task
                 if (apiResultUrl) releaseObjectURL(apiResultUrl);
                 if (translationPayloadUrl && translationPayloadUrl !== redrawPayloadUrl) releaseObjectURL(translationPayloadUrl);
@@ -501,7 +506,7 @@ export function useImageProcessor(
         setProcessingState(ProcessingStep.CROPPING);
         setErrorMsg(null);
         const targets: UploadedImage[] = processAll 
-            ? images.filter(img => !img.isSkipped)
+            ? images.filter(img => !img.isSkipped && !img.isReference)
             : (selectedImage ? [selectedImage] : []);
         if (targets.length === 0) {
             setProcessingState(ProcessingStep.IDLE);

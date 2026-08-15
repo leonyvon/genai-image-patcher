@@ -138,9 +138,10 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const isProcessing = processingState !== ProcessingStep.IDLE && processingState !== ProcessingStep.DONE;
   const hasCompletedImages = images.some(img => img.regions.some(r => r.status === 'completed') || img.finalResultUrl);
+  const processableImages = images.filter(img => !img.isReference);
   const downloadCount = hasCompletedImages 
-      ? images.filter(img => img.regions.some(r => r.status === 'completed') || img.isSkipped).length 
-      : images.length;
+      ? processableImages.filter(img => img.regions.some(r => r.status === 'completed') || img.isSkipped).length 
+      : processableImages.length;
   
   const lang = config.language;
 
@@ -172,10 +173,10 @@ const Sidebar: React.FC<SidebarProps> = ({
     const hasAnyResults = images.some(img => img.regions.some(r => r.status === 'completed') || img.finalResultUrl);
     
     if (hasAnyResults) {
-        imagesToZip = images.filter(img => img.regions.some(r => r.status === 'completed') || img.finalResultUrl || img.isSkipped);
+        imagesToZip = images.filter(img => !img.isReference && (img.regions.some(r => r.status === 'completed') || img.finalResultUrl || img.isSkipped));
     } 
     else {
-        imagesToZip = images;
+        imagesToZip = images.filter(img => !img.isReference);
     }
 
     if (imagesToZip.length === 0) return;
@@ -250,7 +251,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       }
   };
 
-  const hasValidKey = config.provider === 'openai' ? !!config.openaiApiKey : !!config.geminiApiKey;
+  const hasValidKey = config.provider === 'openai' ? !!config.openaiApiKey : config.provider === 'grsai' ? !!config.grsaiApiKey : !!config.geminiApiKey;
   const targetImageExists = processAll ? images.length > 0 : !!currentImage;
   const hasRegions = processAll 
     ? images.some(i => i.regions.length > 0) 
