@@ -76,7 +76,7 @@ export function useImageManager(performanceMode: PerformanceMode) {
   const stitchCacheRef = useRef<Map<string, { signature: string; url: string }>>(new Map());
 
   const computeStitchSignature = (image: UploadedImage): string => {
-    const parts: string[] = [image.previewUrl];
+    const parts: string[] = [image.originalUrl];
     for (const r of image.regions) {
       if (r.status !== 'completed' || !r.processedImageUrl) continue;
       parts.push(
@@ -106,7 +106,7 @@ export function useImageManager(performanceMode: PerformanceMode) {
     if (cached && cached.signature === signature) {
       return cached.url;
     }
-    const url = await stitchImage(image.previewUrl, image.regions);
+    const url = await stitchImage(image.originalUrl, image.regions);
     if (cached) releaseObjectURL(cached.url);
     stitchCacheRef.current.set(image.id, { signature, url });
     return url;

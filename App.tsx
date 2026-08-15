@@ -584,7 +584,7 @@ export default function App() {
           let stitchedUrl: string;
           let isCached = false;
           if (config.useInvertedMasking && selectedImage.fullAiResultUrl) {
-              stitchedUrl = await stitchImageInverted(selectedImage.previewUrl, selectedImage.fullAiResultUrl, selectedImage.regions);
+              stitchedUrl = await stitchImageInverted(selectedImage.originalUrl, selectedImage.fullAiResultUrl, selectedImage.regions);
           } else {
               stitchedUrl = await getStitchedUrl(selectedImage);
               isCached = true;
@@ -609,9 +609,9 @@ export default function App() {
       try {
           let stitchedUrl: string;
           if (config.useInvertedMasking && selectedImage.fullAiResultUrl) {
-              stitchedUrl = await stitchImageInverted(selectedImage.previewUrl, selectedImage.fullAiResultUrl, selectedImage.regions);
+              stitchedUrl = await stitchImageInverted(selectedImage.originalUrl, selectedImage.fullAiResultUrl, selectedImage.regions);
           } else {
-              stitchedUrl = await stitchImage(selectedImage.previewUrl, selectedImage.regions);
+              stitchedUrl = await stitchImage(selectedImage.originalUrl, selectedImage.regions);
           }
           handleApplyResultAsOriginal(selectedImage.id, stitchedUrl);
       } catch (e) {
