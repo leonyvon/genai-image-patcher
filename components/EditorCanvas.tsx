@@ -25,6 +25,7 @@ interface EditorCanvasProps {
   selectedRegionId: string | null;
   onSelectRegion: (regionId: string | null) => void;
   onOcrRegion?: (regionId: string) => void;
+  onFlipRegion?: (regionId: string) => void;
   showOcrButton?: boolean;
   showEditorButton?: boolean;
   onAdjustRegionSize?: (regionId: string, isExpand: boolean) => void;
@@ -65,6 +66,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
     selectedRegionId,
     onSelectRegion,
     onOcrRegion,
+    onFlipRegion,
     showOcrButton = false,
     showEditorButton = false,
     onAdjustRegionSize,
@@ -1034,6 +1036,18 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
                             title={region.contextOnly ? 'Context Only (click to enable translation)' : 'Mark as Context Only'}
                           >
                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                          </button>
+                      )}
+                      {!disabled && onFlipRegion && region.status !== 'processing' && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onFlipRegion(region.id);
+                            }}
+                             className="w-6 h-6 bg-skin-surface text-skin-text border border-skin-border rounded-full flex items-center justify-center shadow-md hover:shadow-lg hover:bg-skin-fill transition-all"
+                             title="Flip Horizontal"
+                          >
+                            <span className="text-[11px] font-bold leading-none">⇄</span>
                           </button>
                       )}
                       {!disabled && region.status !== 'processing' && (
