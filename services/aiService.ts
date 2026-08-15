@@ -386,6 +386,155 @@ const generateOpenAIImage = async (
 };
 
 /**
+ * Decode the pixel dimensions of a base64 data URL image (browser-side).
+ * Used to derive the region slice's real aspect ratio for the grsai API.
+ */
+const getImageDimensionsFromBase64 = (dataUrl: string): Promise<{ width: number; height: number }> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => reject(new Error('Failed to decode image dimensions'));
+    img.src = dataUrl;
+  });
+};
+
+/**
+ * Handles communication with the grsai (GPT Image 2) API.
+ * The API returns a JSON payload containing an image URL which is then
+ * downloaded and converted to a base64 data URL.
+ *
+ * `signal` is the per-attempt signal handed down by executeWithRetry. When
+ * `timeoutMs` is provided, a local AbortController additionally aborts the
+ * fetch after the timeout (mirroring the per-attempt pattern).
+ */
+const generateGrsaiImage = async (
+  imageBase64: string,
+  prompt: string,
+  apiKey: string,
+  modelName: string,
+  signal?: AbortSignal,
+  timeoutMs?: number,
+  referenceImages?: string[]
+): Promise<string> => {
+  if (!apiKey) {
+    throw new Error("grsai API Key is missing");
+  }
+
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
+  const safeApiKey = sanitizeHeaderValue(apiKey);
+
+  const url = 'https://grsai.dakka.com.cn/v1/api/generate';
+
+  // Local abort controller: honours the incoming signal and an optional
+  // timeout, mirroring the per-attempt pattern in executeWithRetry.
+  const controller = new AbortController();
+  const onOuterAbort = () => controller.abort();
+  if (signal) signal.addEventListener('abort', onOuterAbort, { once: true });
+  const timeoutId = timeoutMs
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : undefined;
+
+  const dataUrl = imageBase64.startsWith('data:')
+    ? imageBase64
+    : `data:image/png;base64,${imageBase64}`;
+
+  // Derive the region's real aspect ratio from the slice so the returned patch
+  // matches the selection's proportions (stitch fitScale ≈ 1, no letterboxing).
+  // Falls back to the API default if the slice can't be decoded.
+  let aspectRatio = '1024x1024';
+  try {
+    const { width, height } = await getImageDimensionsFromBase64(dataUrl);
+    if (width > 0 && height > 0) {
+      aspectRatio = `${width}x${height}`;
+    }
+  } catch (e) {
+    console.warn('grsai: could not derive slice dimensions, falling back to 1024x1024:', e);
+  }
+
+  const body = {
+    model: modelName,
+    prompt: prompt,
+    images: [dataUrl, ...(referenceImages ?? [])],
+    aspectRatio,
+    replyType: 'json',
+  };
+
+  // [TEMP DEBUG] log the exact request the app is about to send
+  console.log('[grsai-debug] request', {
+    model: body.model,
+    aspectRatio: body.aspectRatio,
+    replyType: body.replyType,
+    imageMime: body.images[0].slice(0, 30),
+    imageDataLength: body.images[0].length,
+    referenceCount: body.images.length - 1,
+    promptLength: body.prompt.length,
+    promptHead: body.prompt.slice(0, 100),
+  });
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${safeApiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      // [TEMP DEBUG] full server error body + status
+      console.error('[grsai-debug] HTTP error', {
+        status: response.status,
+        statusText: response.statusText,
+        responseBody: responseText.slice(0, 1000),
+      });
+      let message = response.statusText;
+      try {
+        const parsed = JSON.parse(responseText);
+        message = parsed?.error?.message || parsed?.message || response.statusText;
+      } catch { /* not json */ }
+      throw new Error(`grsai API Error: ${message}`);
+    }
+
+    const data = await response.json();
+
+    const results = data?.results;
+    if (!Array.isArray(results) || results.length === 0) {
+      throw new Error("grsai API returned no results.");
+    }
+
+    const result = results[0];
+    if (result?.status === 'failed' || result?.error) {
+      const errorMsg = result?.error?.message || result?.error || 'unknown reason';
+      throw new Error(`grsai API reported failure: ${errorMsg}`);
+    }
+
+    if (!result?.url) {
+      throw new Error("grsai API returned a result without an image URL.");
+    }
+
+    // Download the generated image and convert it to a base64 data URL
+    return await fetchImageAsBase64(result.url);
+
+  } catch (error) {
+    if ((error as Error).name === 'AbortError') {
+        throw error; // Re-throw aborts to be caught by the UI
+    }
+    if (error instanceof Error && error.message.startsWith('grsai')) {
+        throw error;
+    }
+    console.error("grsai API Error:", error);
+    throw new Error(`grsai API Error: ${(error as Error).message || 'Unknown error'}`);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+    if (signal) signal.removeEventListener('abort', onOuterAbort);
+  }
+};
+
+/**
  * Perform translation using an OpenAI-compatible endpoint.
  * Returns the translated text found in the image.
  */
@@ -489,7 +638,10 @@ export const generateRegionEdit = async (
   // The wrapper hands us a per-attempt signal that aborts on outer cancel
   // OR the timeout — forward it down to fetch / SDK so they actually stop.
   const worker = async (opSignal: AbortSignal) => {
-    if (config.provider === 'openai') {
+    if (config.provider === 'grsai') {
+      if (!config.grsaiApiKey) throw new Error("grsai API Key is missing");
+      return generateGrsaiImage(imageBase64, prompt, config.grsaiApiKey, config.grsaiModel, opSignal, timeout, config.grsaiReferenceImages);
+    } else if (config.provider === 'openai') {
       if (!config.openaiApiKey) throw new Error("OpenAI API Key is missing");
       return generateOpenAIImage(imageBase64, prompt, config, opSignal);
     } else {
