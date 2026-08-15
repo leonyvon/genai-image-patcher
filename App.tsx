@@ -58,28 +58,72 @@ export default function App() {
   } = useImageProcessor(images, updateImage, updateAllImages, config, selectedImage);
 
   // grsai 全局参考图：图库图片标记/取消标记。标记时压缩并持久化到 config。
+  // 有效参考图判定：referenceBase64 必须仍存在于 config.grsaiReferenceImages。
+  const referenceToggleInFlight = useRef<Set<string>>(new Set());
   const handleToggleReference = useCallback(async (imageId: string) => {
     const img = images.find(i => i.id === imageId);
     if (!img) return;
-
-    if (img.isReference && img.referenceBase64) {
-      // 取消标记：从配置移除对应条目，清除图片标志
-      setConfig(prev => ({ ...prev, grsaiReferenceImages: prev.grsaiReferenceImages.filter(b => b !== img.referenceBase64) }));
-      updateImage(imageId, i => ({ ...i, isReference: false, referenceBase64: undefined }));
-      return;
-    }
-
-    // 标记：压缩 → base64 → 写入配置
+    if (referenceToggleInFlight.current.has(imageId)) return;
+    referenceToggleInFlight.current.add(imageId);
     try {
+      if (img.referenceBase64 && config.grsaiReferenceImages.includes(img.referenceBase64)) {
+        // 取消标记：只移除一个匹配条目，避免同内容图片互相误删
+        setConfig(prev => {
+          const idx = prev.grsaiReferenceImages.indexOf(img.referenceBase64!);
+          if (idx < 0) return prev;
+          const next = [...prev.grsaiReferenceImages];
+          next.splice(idx, 1);
+          return { ...prev, grsaiReferenceImages: next };
+        });
+        updateImage(imageId, i => ({ ...i, isReference: false, referenceBase64: undefined }));
+        return;
+      }
+
+      // 标记：压缩 → base64 → 写入配置（含配额保护与去重）
       const compressed = await compressImageToTargetSize(img.originalUrl, { targetSizeKB: 200, maxDimension: 1024 });
-      const b64 = await urlToBase64(compressed);
-      URL.revokeObjectURL(compressed);
+      let b64: string;
+      try {
+        b64 = await urlToBase64(compressed);
+      } finally {
+        // 压缩函数失败回退时可能原样返回入参 URL，不能误 revoke 图片自身的 URL
+        if (compressed !== img.originalUrl && compressed !== img.previewUrl) {
+          URL.revokeObjectURL(compressed);
+        }
+      }
+
+      if (config.grsaiReferenceImages.includes(b64)) {
+        // 同内容参考图已存在：只标记图片本身
+        updateImage(imageId, i => ({ ...i, isReference: true, referenceBase64: b64 }));
+        return;
+      }
+      const totalLen = config.grsaiReferenceImages.reduce((s, b) => s + b.length, 0) + b64.length;
+      if (totalLen > 4_500_000) {
+        alert('参考图总大小超过 localStorage 配额（约 4.5MB），未添加。请在设置面板删除部分参考图。');
+        return;
+      }
       setConfig(prev => ({ ...prev, grsaiReferenceImages: [...prev.grsaiReferenceImages, b64] }));
       updateImage(imageId, i => ({ ...i, isReference: true, referenceBase64: b64 }));
     } catch (e) {
       console.warn('Failed to add reference image:', e);
+    } finally {
+      referenceToggleInFlight.current.delete(imageId);
     }
-  }, [images, setConfig, updateImage]);
+  }, [images, setConfig, updateImage, config.grsaiReferenceImages]);
+
+  // 删除图库图片时同步移除其参考图配置条目，避免孤儿引用
+  const handleDeleteImageWithReferenceCleanup = useCallback((imageId: string) => {
+    const img = images.find(i => i.id === imageId);
+    if (img?.referenceBase64) {
+      setConfig(prev => {
+        const idx = prev.grsaiReferenceImages.indexOf(img.referenceBase64!);
+        if (idx < 0) return prev;
+        const next = [...prev.grsaiReferenceImages];
+        next.splice(idx, 1);
+        return { ...prev, grsaiReferenceImages: next };
+      });
+    }
+    handleDeleteImage(imageId);
+  }, [images, handleDeleteImage, setConfig]);
 
   const [isDragging, setIsDragging] = useState(false);
   const [showGlobalSettings, setShowGlobalSettings] = useState(false);
@@ -557,7 +601,7 @@ export default function App() {
         onManualPatchUpdate={handleManualPatchUpdate}
         onUpdateRegionPrompt={handleUpdateRegionPrompt}
         onUpdateImagePrompt={handleUpdateImagePrompt}
-        onDeleteImage={handleDeleteImage}
+        onDeleteImage={handleDeleteImageWithReferenceCleanup}
         onClearAllImages={handleClearAllImages} 
         onToggleSkip={handleToggleSkip}
         onToggleReference={handleToggleReference}

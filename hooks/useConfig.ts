@@ -228,7 +228,7 @@ export function useConfig() {
         }
 
         // Ensure grsaiReferenceImages exists
-        if (typeof migratedConfig.grsaiReferenceImages === 'undefined') {
+        if (typeof migratedConfig.grsaiReferenceImages === 'undefined' || !Array.isArray(migratedConfig.grsaiReferenceImages)) {
             migratedConfig.grsaiReferenceImages = [];
         }
 

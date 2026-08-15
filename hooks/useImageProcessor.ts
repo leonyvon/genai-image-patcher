@@ -1,7 +1,7 @@
 
 import { useState, useRef } from 'react';
 import { AppConfig, ProcessingStep, UploadedImage, Region } from '../types';
-import { loadImage, createMultiMaskedFullImage, createInvertedMultiMaskedFullImage, cropRegion, padImageToSquare, depadImageByRatio, depadImageFromSquare, stitchImageInverted, extractCropFromFullImage, compressImageToTargetSize, PaddingInfo, urlToBase64, base64ToObjectURLAsync, releaseObjectURL } from '../services/imageUtils';
+import { loadImage, createMultiMaskedFullImage, createInvertedMultiMaskedFullImage, cropRegion, padImageToSquare, depadImageByRatio, depadImageFromSquare, stitchImageInverted, extractCropFromFullImage, compressImageToTargetSize, PaddingInfo, urlToBase64, base64ToObjectURLAsync, releaseObjectURL, isEffectiveReference } from '../services/imageUtils';
 import { generateRegionEdit, generateTranslation } from '../services/aiService';
 import { AsyncSemaphore, runWithConcurrency } from '../services/concurrencyUtils';
 import { t } from '../services/translations';
@@ -63,7 +63,7 @@ export function useImageProcessor(
     const processSingleImage = async (imageSnapshot: UploadedImage, signal: AbortSignal, globalSemaphore: AsyncSemaphore) => {
         if (signal.aborted) return;
         if (imageSnapshot.isSkipped) return;
-        if (imageSnapshot.isReference) return;
+        if (isEffectiveReference(imageSnapshot, config.grsaiReferenceImages)) return;
 
         const regionsMap = new Map<string, Region>();
         imageSnapshot.regions.forEach(r => regionsMap.set(r.id, r));
@@ -506,8 +506,8 @@ export function useImageProcessor(
         setProcessingState(ProcessingStep.CROPPING);
         setErrorMsg(null);
         const targets: UploadedImage[] = processAll 
-            ? images.filter(img => !img.isSkipped && !img.isReference)
-            : (selectedImage ? [selectedImage] : []);
+            ? images.filter(img => !img.isSkipped && !isEffectiveReference(img, config.grsaiReferenceImages))
+            : (selectedImage && !isEffectiveReference(selectedImage, config.grsaiReferenceImages) ? [selectedImage] : []);
         if (targets.length === 0) {
             setProcessingState(ProcessingStep.IDLE);
             return;

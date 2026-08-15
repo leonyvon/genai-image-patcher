@@ -198,7 +198,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                                         <img src={b64} className="w-full h-full object-cover" alt={`reference ${i + 2}`} />
                                         <span className="absolute bottom-0.5 left-0.5 px-1 rounded bg-amber-500 text-white text-[8px] font-bold">{`[image ${i + 2}]`}</span>
                                         <button
-                                            onClick={() => onChange('grsaiReferenceImages', config.grsaiReferenceImages.filter((_, idx) => idx !== i))}
+                                            onClick={() => onChange('grsaiReferenceImages', (arr: string[]) => arr.filter((_, idx) => idx !== i))}
                                             className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[9px] leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                                             title="Remove reference"
                                         >✕</button>

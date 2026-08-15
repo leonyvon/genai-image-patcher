@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { AppConfig, ProcessingStep, UploadedImage, ThemeType } from '../types';
 import { fetchOpenAIModels } from '../services/aiService';
-import { stitchImageInverted } from '../services/imageUtils';
+import { stitchImageInverted, isEffectiveReference } from '../services/imageUtils';
 import { t } from '../services/translations';
 import JSZip from 'jszip';
 import { Section } from './sidebar/Section';
@@ -140,7 +140,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const isProcessing = processingState !== ProcessingStep.IDLE && processingState !== ProcessingStep.DONE;
   const hasCompletedImages = images.some(img => img.regions.some(r => r.status === 'completed') || img.finalResultUrl);
-  const processableImages = images.filter(img => !img.isReference);
+  const processableImages = images.filter(img => !isEffectiveReference(img, config.grsaiReferenceImages));
   const downloadCount = hasCompletedImages 
       ? processableImages.filter(img => img.regions.some(r => r.status === 'completed') || img.isSkipped).length 
       : processableImages.length;
@@ -148,7 +148,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const lang = config.language;
 
   const handleConfigChange = (key: keyof AppConfig, value: any) => {
-    setConfig(prev => ({ ...prev, [key]: value }));
+    setConfig(prev => ({ ...prev, [key]: typeof value === 'function' ? value(prev[key]) : value }));
   };
 
   const handleFetchOpenAIModels = async () => {
@@ -175,10 +175,10 @@ const Sidebar: React.FC<SidebarProps> = ({
     const hasAnyResults = images.some(img => img.regions.some(r => r.status === 'completed') || img.finalResultUrl);
     
     if (hasAnyResults) {
-        imagesToZip = images.filter(img => !img.isReference && (img.regions.some(r => r.status === 'completed') || img.finalResultUrl || img.isSkipped));
+        imagesToZip = images.filter(img => !isEffectiveReference(img, config.grsaiReferenceImages) && (img.regions.some(r => r.status === 'completed') || img.finalResultUrl || img.isSkipped));
     } 
     else {
-        imagesToZip = images.filter(img => !img.isReference);
+        imagesToZip = images.filter(img => !isEffectiveReference(img, config.grsaiReferenceImages));
     }
 
     if (imagesToZip.length === 0) return;
@@ -429,10 +429,10 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                           <button 
                              onClick={(e) => { e.stopPropagation(); onToggleReference(img.id); }}
-                             className={`absolute top-1 left-[24px] p-1 rounded-sm shadow-sm transition-all z-10 ${img.isReference ? 'bg-amber-400 text-white' : 'bg-skin-surface/90 text-skin-muted hover:text-amber-500 hover:bg-white'}`}
-                             title={img.isReference ? t(lang, 'removeReference') : t(lang, 'useAsReference')}
+                             className={`absolute top-1 left-[24px] p-1 rounded-sm shadow-sm transition-all z-10 ${isEffectiveReference(img, config.grsaiReferenceImages) ? 'bg-amber-400 text-white' : 'bg-skin-surface/90 text-skin-muted hover:text-amber-500 hover:bg-white'}`}
+                             title={isEffectiveReference(img, config.grsaiReferenceImages) ? t(lang, 'removeReference') : t(lang, 'useAsReference')}
                           >
-                             <svg className="w-3 h-3" fill={img.isReference ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118L2.98 10.1c-.783-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>
+                             <svg className="w-3 h-3" fill={isEffectiveReference(img, config.grsaiReferenceImages) ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.196-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118L2.98 10.1c-.783-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" /></svg>
                           </button>
 
                           <button 

@@ -71,6 +71,17 @@ export const urlToBase64 = (url: string): Promise<string> => {
 };
 
 /**
+ * True when the image is an "effective" grsai reference: it carries a stored
+ * reference base64 that still exists in the config list. Images whose config
+ * entry was deleted (e.g. in Settings) automatically fall back to normal
+ * processing instead of being silently excluded.
+ */
+export const isEffectiveReference = (
+  img: { referenceBase64?: string },
+  referenceImages: string[]
+): boolean => !!img.referenceBase64 && referenceImages.includes(img.referenceBase64);
+
+/**
  * Convert a base64 data URL to an Object URL (Blob-backed).
  * The original base64 string can then be set to null for GC.
  */
