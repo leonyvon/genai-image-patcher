@@ -71,6 +71,23 @@ export const urlToBase64 = (url: string): Promise<string> => {
 };
 
 /**
+ * Horizontally mirror an image, returning a new Object URL.
+ * The caller owns the returned URL and must release it when done.
+ */
+export const flipImageHorizontal = async (sourceUrl: string): Promise<string> => {
+  const img = await loadImage(sourceUrl);
+  const canvas = document.createElement('canvas');
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not get canvas context');
+  ctx.translate(canvas.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(img, 0, 0);
+  return canvasToObjectURL(canvas);
+};
+
+/**
  * True when the image is an "effective" grsai reference: it carries a stored
  * reference base64 that still exists in the config list. Images whose config
  * entry was deleted (e.g. in Settings) automatically fall back to normal
