@@ -169,7 +169,7 @@ def generate(scope: str = "single") -> str:
 
 @mcp.tool()
 def get_full_image(image_id: str, output_path: str) -> str:
-    """把整图最终结果保存为本地文件并返回路径。标准区域模式返回"原图+补丁拼合"的最终结果；反向遮罩返回拼合整图。无结果时提示先 generate。"""
+    """把整图最终结果保存为本地文件并返回路径。标准区域模式返回"原图+补丁拼合"的最终结果；反向遮罩返回拼合整图。注意：output_path 必须用独立/临时路径，禁止设为上传的原图或源文件路径（会覆盖并永久丢失原图）。无结果时提示先 generate。"""
     if not _ensure_bridge():
         return _err("桥接服务不可达")
     res = _cmd("get_full_image", {"image_id": image_id})
