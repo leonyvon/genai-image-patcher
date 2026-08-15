@@ -44,7 +44,6 @@ export class BridgeClient {
   private url: string;
   private commandHandler: CommandHandler | null = null;
   private connectionHandler: ((connected: boolean) => void) | null = null;
-  private commandResolvers = new Map<string, (r: BridgeOutcome) => void>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   connected = false;
@@ -78,7 +77,11 @@ export class BridgeClient {
       let outcome: BridgeOutcome;
       try {
         const result = this.commandHandler ? await this.commandHandler(msg.action, msg.params ?? {}) : { error: 'no handler' };
-        outcome = result && typeof result === 'object' && 'ok' in result ? result as BridgeOutcome : { ok: true, result };
+        outcome = result && typeof result === 'object' && 'ok' in result
+          ? result as BridgeOutcome
+          : result && typeof result === 'object' && 'error' in result
+            ? { ok: false, error: (result as any).error }
+            : { ok: true, result };
       } catch (e) {
         outcome = { ok: false, error: (e as Error).message || String(e) };
       }
@@ -90,8 +93,6 @@ export class BridgeClient {
     ws.onclose = () => {
       this.connected = false;
       this.connectionHandler?.(false);
-      this.commandResolvers.forEach((r) => r({ ok: false, error: 'bridge disconnected' }));
-      this.commandResolvers.clear();
       if (!this.closed) {
         this.reconnectTimer = setTimeout(() => this.connect(), 3000);
       }

@@ -27,11 +27,20 @@ const json = (res, code, obj) => {
   res.end(JSON.stringify(obj));
 };
 
+const originAllowed = (origin) => {
+  if (!origin) return true; // 非浏览器调用（MCP/curl/smoke）
+  return origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:');
+};
+
 const httpServer = createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (req.method !== 'OPTIONS' && !originAllowed(req.headers.origin)) {
+    json(res, 403, { error: 'origin not allowed' });
+    return;
+  }
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
   if (req.method === 'GET' && url.pathname === '/health') {
@@ -67,6 +76,7 @@ const httpServer = createServer((req, res) => {
     const ext = path.extname(url.searchParams.get('name') || '');
     const filePath = path.join(FILE_DIR, id + ext);
     const out = createWriteStream(filePath);
+    out.on('error', () => { try { json(res, 500, { error: 'write failed' }); } catch {} });
     req.pipe(out);
     req.on('end', () => {
       json(res, 200, { id, url: `http://${HOST}:${PORT}/files/${id}${ext}` });
@@ -83,7 +93,11 @@ const httpServer = createServer((req, res) => {
 });
 
 const { WebSocketServer } = await import('ws');
-const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+const wss = new WebSocketServer({
+  server: httpServer,
+  path: '/ws',
+  verifyClient: (info, cb) => cb(originAllowed(info.origin)),
+});
 wss.on('connection', (socket) => {
   appSocket = socket;
   socket.on('message', (raw) => {
@@ -100,7 +114,14 @@ wss.on('connection', (socket) => {
       }
     }
   });
-  socket.on('close', () => { if (appSocket === socket) appSocket = null; });
+  socket.on('close', () => {
+    if (appSocket === socket) appSocket = null;
+    pendingCommands.forEach((p) => {
+      clearTimeout(p.timer);
+      p.resolve({ ok: false, error: 'app disconnected' });
+    });
+    pendingCommands.clear();
+  });
 });
 
 httpServer.listen(PORT, HOST, () => {

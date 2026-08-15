@@ -159,7 +159,7 @@ export default function App() {
 
   const bridgeHandlers: BridgeHandlerMap = {
     upload: async ({ files }) => {
-      if (!Array.isArray(files) || files.length === 0) return { error: 'no files in params' };
+      if (!Array.isArray(files) || files.length === 0) return { ok: false, error: 'no files in params' };
       try {
         const fileObjs = await Promise.all(files.map(async (f: any) => {
           const blob = await fetch(f.url).then((r) => r.blob());
@@ -168,33 +168,37 @@ export default function App() {
         const ids = await addImageFiles(fileObjs);
         return { ok: true, result: { ids } };
       } catch (e) {
-        return { error: (e as Error).message || String(e) };
+        return { ok: false, error: (e as Error).message || String(e) };
       }
     },
     select_image: async ({ image_id }) => {
-      if (!images.some((i) => i.id === image_id)) return { error: `image not found: ${image_id}` };
+      if (!images.some((i) => i.id === image_id)) return { ok: false, error: `image not found: ${image_id}` };
       handleSelectImage(image_id);
       return { ok: true };
     },
     mark_reference: async ({ image_id }) => {
       const img = images.find((i) => i.id === image_id);
-      if (!img) return { error: `image not found: ${image_id}` };
+      if (!img) return { ok: false, error: `image not found: ${image_id}` };
       if (isEffectiveReference(img, config.grsaiReferenceImages)) return { ok: true };
       await handleToggleReference(image_id);
       return { ok: true };
     },
     unmark_reference: async ({ image_id }) => {
       const img = images.find((i) => i.id === image_id);
-      if (!img) return { error: `image not found: ${image_id}` };
+      if (!img) return { ok: false, error: `image not found: ${image_id}` };
       if (!isEffectiveReference(img, config.grsaiReferenceImages)) return { ok: true };
       await handleToggleReference(image_id);
       return { ok: true };
     },
     set_prompt: async ({ prompt, image_id, region_id }) => {
-      if (typeof prompt !== 'string' || !prompt) return { error: 'prompt is required' };
+      if (typeof prompt !== 'string' || !prompt) return { ok: false, error: 'prompt is required' };
       if (image_id && region_id) {
+        if (!images.some((i) => i.id === image_id)) return { ok: false, error: `image not found: ${image_id}` };
+        const img = images.find((i) => i.id === image_id);
+        if (!img!.regions.some((r) => r.id === region_id)) return { ok: false, error: `region not found: ${region_id}` };
         handleUpdateRegionPrompt(image_id, region_id, prompt);
       } else if (image_id) {
+        if (!images.some((i) => i.id === image_id)) return { ok: false, error: `image not found: ${image_id}` };
         handleUpdateImagePrompt(image_id, prompt);
       } else {
         setConfig((prev) => ({ ...prev, prompt }));
@@ -202,19 +206,23 @@ export default function App() {
       return { ok: true };
     },
     generate: async ({ scope }) => {
+      if (scope !== 'single' && scope !== 'all') return { ok: false, error: "scope must be 'single' or 'all'" };
       handleProcess(scope === 'all');
       return { ok: true };
     },
     get_image: async ({ image_id, region_id }) => {
       const img = images.find((i) => i.id === image_id);
-      if (!img) return { error: `image not found: ${image_id}` };
+      if (!img) return { ok: false, error: `image not found: ${image_id}` };
       let url: string | null = null;
       if (region_id) {
         url = img.regions.find((r) => r.id === region_id)?.processedImageUrl ?? null;
+        if (!url && config.useInvertedMasking) {
+          return { ok: false, error: 'reverse-masking mode has no per-region patch — call get_image without region_id for the full image' };
+        }
       } else {
         url = img.finalResultUrl ?? img.fullAiResultUrl ?? null;
       }
-      if (!url) return { error: 'no result available yet — run generate first' };
+      if (!url) return { ok: false, error: 'no result available yet — run generate first' };
       const dataUrl = await urlToBase64(url);
       const [header, base64] = dataUrl.split(',');
       const mime = header.match(/:(.*?);/)?.[1] || 'image/png';

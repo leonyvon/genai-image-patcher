@@ -62,14 +62,17 @@ def _get() -> dict:
 
 
 def _cmd(action: str, params: dict | None = None) -> dict:
-    r = httpx.post(
-        f"{BRIDGE_URL}/command",
-        json={"action": action, "params": params or {}},
-        timeout=180,
-        trust_env=False,
-    )
-    r.raise_for_status()
-    return r.json()
+    try:
+        r = httpx.post(
+            f"{BRIDGE_URL}/command",
+            json={"action": action, "params": params or {}},
+            timeout=180,
+            trust_env=False,
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"ok": False, "error": f"桥接命令失败: {e}"}
 
 
 def _ok(data) -> str:
@@ -115,7 +118,7 @@ def upload_image(paths: list[str]) -> str:
         res = _cmd("upload", {"files": [{"url": fdata["url"], "name": path.name}]})
         if not res.get("ok"):
             return _err(str(res.get("error")))
-        added.extend(res.get("result") or [])
+        added.extend((res.get("result") or {}).get("ids") or [])
     return _ok({"added": added})
 
 
