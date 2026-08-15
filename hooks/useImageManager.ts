@@ -119,13 +119,13 @@ export function useImageManager(performanceMode: PerformanceMode) {
     }
   }, [selectedImage?.regions, viewMode]);
 
-  const addImageFiles = async (fileList: File[]) => {
+  const addImageFiles = async (fileList: File[]): Promise<string[]> => {
     // Accept image MIME types OR files with an empty/unknown type — some
     // environments don't populate File.type, and a strict MIME filter would
     // silently drop them. Real image validity is enforced by loadImage below.
     const imageFiles = fileList.filter(f => !f.name.startsWith('.') && (f.type.startsWith('image/') || !f.type));
 
-    if (imageFiles.length === 0) return;
+    if (imageFiles.length === 0) return [];
 
     setUploadProgress({ current: 0, total: imageFiles.length });
     const newImages: UploadedImage[] = [];
@@ -189,6 +189,7 @@ export function useImageManager(performanceMode: PerformanceMode) {
       }
     }
     setUploadProgress(null);
+    return newImages.map((i) => i.id);
   };
 
   const handleSelectImage = useCallback((id: string) => {

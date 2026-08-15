@@ -1,16 +1,18 @@
 
-import React, { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
 import { Region, ProcessingStep, AppConfig, RestoreBox } from './types';
 import Sidebar from './components/Sidebar';
 import EditorCanvas from './components/EditorCanvas';
 import type { TextObject } from './components/PatchEditor';
-import { loadImage, cropRegion, stitchImage, createInvertedMultiMaskedFullImage, extractCropFromFullImage, stitchImageInverted, releaseObjectURL, compressImageToTargetSize, urlToBase64 } from './services/imageUtils';
+import { loadImage, cropRegion, stitchImage, createInvertedMultiMaskedFullImage, extractCropFromFullImage, stitchImageInverted, releaseObjectURL, compressImageToTargetSize, urlToBase64, isEffectiveReference } from './services/imageUtils';
 import { fetchOpenAIModels } from './services/aiService';
 import { recognizeText } from './services/detectionService';
 import { t } from './services/translations';
 import { useConfig } from './hooks/useConfig';
 import { useImageManager } from './hooks/useImageManager';
 import { useImageProcessor } from './hooks/useImageProcessor';
+import { useBridge, BridgeHandlerMap } from './hooks/useBridge';
+import { BridgeStateSnapshot } from './services/bridgeClient';
 
 // Heavy components: only loaded when user opens the editor / help dialog.
 // PatchEditor pulls in ~1000 lines of canvas/text-rendering logic that is
@@ -124,6 +126,107 @@ export default function App() {
     }
     handleDeleteImage(imageId);
   }, [images, handleDeleteImage, setConfig]);
+
+  // --- MCP Bridge ---
+  // 快照不含 bridgeConnected 字段（已从 BridgeStateSnapshot 类型移除）；
+  // 连接状态由桥接 /health 的 appConnected 提供，Agent 经 get_status 读取。
+  const bridgeSnapshot = useMemo<BridgeStateSnapshot | null>(() => ({
+    processingState,
+    selectedImageId,
+    images: images.map((img) => ({
+      id: img.id,
+      name: img.file.name,
+      width: img.originalWidth,
+      height: img.originalHeight,
+      isReference: isEffectiveReference(img, config.grsaiReferenceImages),
+      hasResult: !!img.finalResultUrl || img.regions.some((r) => !!r.processedImageUrl),
+      regions: img.regions.map((r) => ({
+        id: r.id,
+        status: r.status,
+        x: r.x, y: r.y, width: r.width, height: r.height,
+        customPrompt: r.customPrompt ?? null,
+        hasResult: !!r.processedImageUrl,
+      })),
+    })),
+    config: {
+      provider: config.provider,
+      model: config.provider === 'openai' ? config.openaiModel : config.provider === 'grsai' ? config.grsaiModel : config.geminiModel,
+      prompt: config.prompt,
+      processingMode: config.processingMode,
+      referenceCount: config.grsaiReferenceImages.length,
+    },
+  }), [images, config, processingState, selectedImageId]);
+
+  const bridgeHandlers: BridgeHandlerMap = {
+    upload: async ({ files }) => {
+      if (!Array.isArray(files) || files.length === 0) return { error: 'no files in params' };
+      try {
+        const fileObjs = await Promise.all(files.map(async (f: any) => {
+          const blob = await fetch(f.url).then((r) => r.blob());
+          return new File([blob], f.name || 'upload.png', { type: blob.type || 'image/png' });
+        }));
+        const ids = await addImageFiles(fileObjs);
+        return { ok: true, result: { ids } };
+      } catch (e) {
+        return { error: (e as Error).message || String(e) };
+      }
+    },
+    select_image: async ({ image_id }) => {
+      if (!images.some((i) => i.id === image_id)) return { error: `image not found: ${image_id}` };
+      handleSelectImage(image_id);
+      return { ok: true };
+    },
+    mark_reference: async ({ image_id }) => {
+      const img = images.find((i) => i.id === image_id);
+      if (!img) return { error: `image not found: ${image_id}` };
+      if (isEffectiveReference(img, config.grsaiReferenceImages)) return { ok: true };
+      await handleToggleReference(image_id);
+      return { ok: true };
+    },
+    unmark_reference: async ({ image_id }) => {
+      const img = images.find((i) => i.id === image_id);
+      if (!img) return { error: `image not found: ${image_id}` };
+      if (!isEffectiveReference(img, config.grsaiReferenceImages)) return { ok: true };
+      await handleToggleReference(image_id);
+      return { ok: true };
+    },
+    set_prompt: async ({ prompt, image_id, region_id }) => {
+      if (typeof prompt !== 'string' || !prompt) return { error: 'prompt is required' };
+      if (image_id && region_id) {
+        handleUpdateRegionPrompt(image_id, region_id, prompt);
+      } else if (image_id) {
+        handleUpdateImagePrompt(image_id, prompt);
+      } else {
+        setConfig((prev) => ({ ...prev, prompt }));
+      }
+      return { ok: true };
+    },
+    generate: async ({ scope }) => {
+      handleProcess(scope === 'all');
+      return { ok: true };
+    },
+    get_image: async ({ image_id, region_id }) => {
+      const img = images.find((i) => i.id === image_id);
+      if (!img) return { error: `image not found: ${image_id}` };
+      let url: string | null = null;
+      if (region_id) {
+        url = img.regions.find((r) => r.id === region_id)?.processedImageUrl ?? null;
+      } else {
+        url = img.finalResultUrl ?? img.fullAiResultUrl ?? null;
+      }
+      if (!url) return { error: 'no result available yet — run generate first' };
+      const dataUrl = await urlToBase64(url);
+      const [header, base64] = dataUrl.split(',');
+      const mime = header.match(/:(.*?);/)?.[1] || 'image/png';
+      return { ok: true, result: { mime, base64 } };
+    },
+  };
+
+  const { connected: bridgeConnected } = useBridge({
+    enabled: import.meta.env.DEV,
+    snapshot: bridgeSnapshot,
+    handlers: bridgeHandlers,
+  });
 
   const [isDragging, setIsDragging] = useState(false);
   const [showGlobalSettings, setShowGlobalSettings] = useState(false);
@@ -618,6 +721,7 @@ export default function App() {
         showEditor={showEditor}
         onApplyAsOriginal={handleApplyAsOriginalWrapper}
         uploadProgress={uploadProgress}
+        bridgeConnected={bridgeConnected}
         getStitchedUrl={getStitchedUrl}
       />
       

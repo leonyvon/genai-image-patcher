@@ -42,6 +42,8 @@ interface SidebarProps {
   uploadProgress?: { current: number; total: number } | null;
   /** Returns a cached stitched URL for standard-mode images. The cache owns the URL — do NOT revoke. */
   getStitchedUrl: (image: UploadedImage) => Promise<string>;
+  /** MCP bridge connection status, shown as a status dot in the header. */
+  bridgeConnected: boolean;
 }
 
 const SECTION_STORAGE_KEY = 'genai_patcher_sidebar_sections_v1';
@@ -83,7 +85,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   onApplyAsOriginal,
   onUpdateImagePrompt,
   uploadProgress,
-  getStitchedUrl
+  getStitchedUrl,
+  bridgeConnected,
 }) => {
   const [modelList, setModelList] = useState<string[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
