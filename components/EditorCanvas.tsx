@@ -974,7 +974,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
       setIsSketchPainting(false);
       const live = liveStrokeRef.current;
       liveStrokeRef.current = null;
-      if (live && live.points.length > 0 && onUpdateSketchStrokes) {
+      if (live && live.points.length > 0 && !brushEraser && onUpdateSketchStrokes) {
         onUpdateSketchStrokes(image.id, [...(image.sketchStrokes || []), live]);
       }
     };
@@ -1046,13 +1046,13 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
             const px = ((e.clientX - rect.left) / rect.width) * 100;
             const py = ((e.clientY - rect.top) / rect.height) * 100;
             setIsSketchPainting(true);
-            liveStrokeRef.current = {
-              id: crypto.randomUUID(),
-              color: brushColor,
-              size: brushSize,
-              points: [{ x: px, y: py }],
-            };
             if (!brushEraser) {
+              liveStrokeRef.current = {
+                id: crypto.randomUUID(),
+                color: brushColor,
+                size: brushSize,
+                points: [{ x: px, y: py }],
+              };
               const octx = overlay.getContext('2d');
               if (octx) {
                 const sizePx = (brushSize / 100) * Math.max(overlay.width, overlay.height);
