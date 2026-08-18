@@ -1,5 +1,5 @@
 
-import { Region, UploadedImage, RestoreBox } from '../types';
+import { Region, UploadedImage, RestoreBox, SketchStroke } from '../types';
 
 export interface PaddingInfo {
     originalWidth: number;
@@ -412,12 +412,55 @@ export const depadImageFromSquare = async (
 };
 
 /**
+ * Draws sketch guidance strokes onto a canvas context.
+ * Coordinates are image-relative percentages (0-100); size is a percentage
+ * of the image's max dimension — the formula works on any canvas that has
+ * the image's aspect ratio (overlay, crop, full mask).
+ * When sourceRect (a Region in image-relative %) is given, strokes are
+ * clipped to the canvas rect and mapped into it (region-crop case).
+ */
+export const compositeSketchStrokes = (
+  ctx: CanvasRenderingContext2D,
+  strokes: SketchStroke[],
+  canvasW: number,
+  canvasH: number,
+  sourceRect?: { x: number; y: number; width: number; height: number }
+): void => {
+  if (!strokes || strokes.length === 0) return;
+  ctx.save();
+  if (sourceRect) {
+    ctx.beginPath();
+    ctx.rect(0, 0, canvasW, canvasH);
+    ctx.clip();
+  }
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (const stroke of strokes) {
+    ctx.strokeStyle = stroke.color;
+    ctx.lineWidth = (stroke.size / 100) * Math.max(canvasW, canvasH);
+    ctx.beginPath();
+    let started = false;
+    for (const p of stroke.points) {
+      const lx = sourceRect ? ((p.x - sourceRect.x) / sourceRect.width) * 100 : p.x;
+      const ly = sourceRect ? ((p.y - sourceRect.y) / sourceRect.height) * 100 : p.y;
+      const px = (lx / 100) * canvasW;
+      const py = (ly / 100) * canvasH;
+      if (!started) { ctx.moveTo(px, py); started = true; }
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+};
+
+/**
  * Crops a specific region from the original image.
  * Returns an Object URL.
  */
 export const cropRegion = async (
   imageElement: HTMLImageElement,
-  region: Region
+  region: Region,
+  strokes?: SketchStroke[]
 ): Promise<string> => {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
@@ -437,6 +480,10 @@ export const cropRegion = async (
     x, y, w, h,
     0, 0, w, h
   );
+
+  compositeSketchStrokes(ctx, strokes || [], canvas.width, canvas.height, {
+    x: region.x, y: region.y, width: region.width, height: region.height,
+  });
 
   const result = await canvasToObjectURL(canvas);
   releaseCanvas(canvas);
@@ -485,7 +532,8 @@ export const createMaskedFullImage = (
  */
 export const createMultiMaskedFullImage = (
   imageElement: HTMLImageElement,
-  regions: Region[]
+  regions: Region[],
+  strokes?: SketchStroke[]
 ): Promise<string> => {
   const canvas = document.createElement('canvas');
   canvas.width = imageElement.naturalWidth;
@@ -509,6 +557,8 @@ export const createMultiMaskedFullImage = (
       );
   });
 
+  compositeSketchStrokes(ctx, strokes || [], canvas.width, canvas.height);
+
   return canvasToObjectURL(canvas).then(result => {
     releaseCanvas(canvas);
     return result;
@@ -523,7 +573,8 @@ export const createMultiMaskedFullImage = (
  */
 export const createInvertedMultiMaskedFullImage = (
   imageElement: HTMLImageElement,
-  regions: Region[]
+  regions: Region[],
+  strokes?: SketchStroke[]
 ): Promise<string> => {
   const canvas = document.createElement('canvas');
   canvas.width = imageElement.naturalWidth;
@@ -542,6 +593,8 @@ export const createInvertedMultiMaskedFullImage = (
 
       ctx.fillRect(x, y, w, h);
   });
+
+  compositeSketchStrokes(ctx, strokes || [], canvas.width, canvas.height);
 
   return canvasToObjectURL(canvas).then(result => {
     releaseCanvas(canvas);
