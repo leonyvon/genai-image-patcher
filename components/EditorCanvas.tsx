@@ -1,8 +1,9 @@
 
 import React, { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from 'react';
-import { UploadedImage, Region, Language, RestoreBox } from '../types';
+import { UploadedImage, Region, Language, RestoreBox, ThemeType } from '../types';
 import { t } from '../services/translations';
 import { useCanvasInteraction } from '../hooks/useCanvasInteraction';
+import { usePanelSnap } from '../hooks/usePanelSnap';
 import { renderRegionWithRestore, loadImage, releaseObjectURL } from '../services/imageUtils';
 
 // Helper: convert a canvas to a Blob-backed Object URL (memory-efficient,
@@ -26,6 +27,15 @@ interface EditorCanvasProps {
   onSelectRegion: (regionId: string | null) => void;
   onOcrRegion?: (regionId: string) => void;
   onFlipRegion?: (regionId: string) => void;
+  onApplyRegionAsOriginal?: (imageId: string, regionId: string) => void;
+  onRemoveRegionWithIopaint?: (imageId: string, regionId: string) => void;
+  /** Brush-style IOPaint removal: paint free-form on the whole image, then execute. */
+  removeBrushMode?: boolean;
+  removeBrushSize?: number;
+  theme?: ThemeType;
+  onExecuteRemoveBrush?: (payload: { maskDataUrl: string; bbox: { x: number; y: number; width: number; height: number } }) => void;
+  onClearRemoveBrush?: () => void;
+  onExitRemoveBrush?: () => void;
   showOcrButton?: boolean;
   showEditorButton?: boolean;
   onAdjustRegionSize?: (regionId: string, isExpand: boolean) => void;
@@ -38,6 +48,8 @@ interface EditorCanvasProps {
   restoreBrushSize?: number;
   restoreSelectedRegionId?: string | null;
   onSelectRestoreRegion?: (regionId: string | null) => void;
+  /** When enabled, a drawn region's edges snap to the nearest panel border on mouse-up. */
+  enablePanelSnap?: boolean;
 }
 
 /**
@@ -67,6 +79,14 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
     onSelectRegion,
     onOcrRegion,
     onFlipRegion,
+    onApplyRegionAsOriginal,
+    onRemoveRegionWithIopaint,
+    removeBrushMode = false,
+    removeBrushSize = 8,
+    theme = 'light',
+    onExecuteRemoveBrush,
+    onClearRemoveBrush,
+    onExitRemoveBrush,
     showOcrButton = false,
     showEditorButton = false,
     onAdjustRegionSize,
@@ -79,6 +99,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
     restoreBrushSize = 8,
     restoreSelectedRegionId = null,
     onSelectRestoreRegion,
+    enablePanelSnap = true,
 }) => {
   // --- Refs ---
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -331,6 +352,9 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
     };
   }, []);
 
+  // --- Panel snap: auto-snap drawn regions to nearby panel borders ---
+  const { snapRect } = usePanelSnap(image, enablePanelSnap);
+
   // --- Interaction hook ---
   const {
       interaction,
@@ -344,7 +368,8 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
       onSelectRegion,
       onInteractionStart,
       viewMode as 'original' | 'result',
-      disabled
+      disabled,
+      enablePanelSnap ? snapRect : undefined
   );
 
   // --- Restore mode state ---
@@ -358,11 +383,27 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
   const [restoreCacheVersion, setRestoreCacheVersion] = useState(0);
   const [isInverseMode, setIsInverseMode] = useState(false);
 
+  // --- Preview toggle state (adjusted <-> original for the selected region) ---
+  // Local UI state only: never written to Region / history / MCP snapshots.
+  const [showOriginalPreview, setShowOriginalPreview] = useState(false);
+
+  // Reset the preview toggle whenever the selection changes.
+  useEffect(() => {
+    setShowOriginalPreview(false);
+  }, [selectedRegionId]);
+
   // --- Brush restore state ---
   const [isPainting, setIsPainting] = useState(false);
   const [maskReady, setMaskReady] = useState(false);
   const maskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const brushOverlayRef = useRef<HTMLCanvasElement | null>(null);
+
+  // --- Brush IOPaint-remove state (free-form mask over the whole image) ---
+  const [isRemovePainting, setIsRemovePainting] = useState(false);
+  const [removeMaskReady, setRemoveMaskReady] = useState(false);
+  const removeMaskCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const removeBrushOverlayRef = useRef<HTMLCanvasElement | null>(null);
+  const [brushRemoveSize, setBrushRemoveSize] = useState(removeBrushSize);
 
   // Signature that captures only the fields we care about for the restore composite.
   // Identity of `image.regions` changes on every drag/prompt edit, but the signature
@@ -682,6 +723,164 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
     onSelectRestoreRegion?.(null);
   };
 
+  // --- Brush IOPaint-remove: mask init (full-image sized, black + white paint = remove area) ---
+  useEffect(() => {
+    if (!removeBrushMode) {
+      removeMaskCanvasRef.current = null;
+      setRemoveMaskReady(false);
+      return;
+    }
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = image.originalWidth || 800;
+    maskCanvas.height = image.originalHeight || 600;
+    const mctx = maskCanvas.getContext('2d');
+    if (!mctx) return;
+    mctx.fillStyle = '#000000';
+    mctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+    removeMaskCanvasRef.current = maskCanvas;
+    setRemoveMaskReady(true);
+  }, [removeBrushMode, image.originalWidth, image.originalHeight]);
+
+  // Overlay shows a translucent theme-following veil (mode visible immediately)
+  // + darker translucent circles where the user paints. The mask canvas stays
+  // black-background + white strokes (what actually gets sent to IOPaint).
+  const tintBase = theme === 'dark' ? '255, 255, 255' : '0, 0, 0';
+  const veilAlpha = theme === 'dark' ? 0.14 : 0.18;
+  const strokeAlpha = theme === 'dark' ? 0.5 : 0.5;
+
+  const paintRemoveStrokeOnOverlay = useCallback((overlay: HTMLCanvasElement, mx: number, my: number, radius: number) => {
+    const octx = overlay.getContext('2d');
+    if (!octx) return;
+    octx.globalCompositeOperation = 'source-over';
+    octx.fillStyle = `rgba(${tintBase}, ${strokeAlpha})`;
+    octx.beginPath();
+    octx.arc(mx, my, radius, 0, Math.PI * 2);
+    octx.fill();
+  }, [tintBase, strokeAlpha]);
+
+  const renderRemoveOverlay = useCallback((overlay: HTMLCanvasElement, mask: HTMLCanvasElement, cursor?: { mx: number; my: number; radius: number }) => {
+    const octx = overlay.getContext('2d');
+    if (!octx) return;
+    overlay.width = mask.width;
+    overlay.height = mask.height;
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    // Base translucent veil — makes the brush mode visible at once.
+    octx.fillStyle = `rgba(${tintBase}, ${veilAlpha})`;
+    octx.fillRect(0, 0, overlay.width, overlay.height);
+    // Cursor ring
+    if (cursor) {
+      octx.beginPath();
+      octx.arc(cursor.mx, cursor.my, cursor.radius, 0, Math.PI * 2);
+      octx.strokeStyle = theme === 'dark' ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.8)';
+      octx.lineWidth = 2;
+      octx.stroke();
+    }
+  }, [tintBase, veilAlpha, theme]);
+
+  useEffect(() => {
+    if (!removeBrushMode || !removeBrushOverlayRef.current || !removeMaskCanvasRef.current || !removeMaskReady) return;
+    const overlay = removeBrushOverlayRef.current;
+    const mask = removeMaskCanvasRef.current;
+    renderRemoveOverlay(overlay, mask);
+  }, [removeBrushMode, removeMaskReady, renderRemoveOverlay]);
+
+  // Window-level mouse handlers for brush painting (remove mode)
+  useEffect(() => {
+    if (!removeBrushMode) return;
+
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      if (!isRemovePainting || !removeBrushOverlayRef.current || !removeMaskCanvasRef.current) return;
+      const overlay = removeBrushOverlayRef.current;
+      const mask = removeMaskCanvasRef.current;
+      const mctx = mask.getContext('2d');
+      if (!mctx) return;
+
+      const rect = overlay.getBoundingClientRect();
+      const scaleX = mask.width / Math.max(1, rect.width);
+      const scaleY = mask.height / Math.max(1, rect.height);
+      const mx = (e.clientX - rect.left) * scaleX;
+      const my = (e.clientY - rect.top) * scaleY;
+
+      // Use the LOCAL brushRemoveSize (slider) — the prop is only the initial value.
+      const brushRadius = (brushRemoveSize / 100) * Math.max(mask.width, mask.height);
+
+      // Submit mask: white stroke on black background (what IOPaint receives)
+      mctx.globalCompositeOperation = 'source-over';
+      mctx.fillStyle = '#FFFFFF';
+      mctx.beginPath();
+      mctx.arc(mx, my, brushRadius, 0, Math.PI * 2);
+      mctx.fill();
+
+      // Visual overlay: translucent stroke on the veil
+      paintRemoveStrokeOnOverlay(overlay, mx, my, brushRadius);
+    };
+
+    const handleWindowMouseUp = () => {
+      setIsRemovePainting(false);
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+    };
+  }, [removeBrushMode, isRemovePainting, brushRemoveSize, paintRemoveStrokeOnOverlay]);
+
+  // Compute painted bbox (percent coords) + mask dataURL, then hand off to App.
+  const executeRemoveBrush = useCallback(async () => {
+    const mask = removeMaskCanvasRef.current;
+    if (!mask || !onExecuteRemoveBrush) return;
+    const mctx = mask.getContext('2d');
+    if (!mctx) return;
+    const imgData = mctx.getImageData(0, 0, mask.width, mask.height).data;
+    let minX = mask.width, minY = mask.height, maxX = -1, maxY = -1;
+    for (let y = 0; y < mask.height; y++) {
+      for (let x = 0; x < mask.width; x++) {
+        // mask 是黑底（不透明，alpha 恒 255）+ 白笔迹——只能按"白"判定已涂抹
+        const i = (y * mask.width + x) * 4;
+        if (imgData[i] > 200 && imgData[i + 1] > 200 && imgData[i + 2] > 200) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (maxX < 0) return; // nothing painted
+    const bbox = {
+      x: (minX / mask.width) * 100,
+      y: (minY / mask.height) * 100,
+      width: ((maxX - minX + 1) / mask.width) * 100,
+      height: ((maxY - minY + 1) / mask.height) * 100,
+    };
+    // IOPaint 端 b64decode 无法解 blob: URL——必须传 dataURL（base64）
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      mask.toBlob((blob) => {
+        if (!blob) { reject(new Error('canvas.toBlob returned null')); return; }
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      }, 'image/png');
+    });
+    onExecuteRemoveBrush({ maskDataUrl: dataUrl, bbox });
+  }, [onExecuteRemoveBrush]);
+
+  const clearRemoveBrush = useCallback(() => {
+    const mask = removeMaskCanvasRef.current;
+    if (!mask) return;
+    const mctx = mask.getContext('2d');
+    if (!mctx) return;
+    mctx.fillStyle = '#000000';
+    mctx.fillRect(0, 0, mask.width, mask.height);
+    const overlay = removeBrushOverlayRef.current;
+    if (overlay) {
+      renderRemoveOverlay(overlay, mask);
+    }
+    onClearRemoveBrush?.();
+  }, [onClearRemoveBrush, renderRemoveOverlay]);
+
   const handleDeleteRestoreBox = (regionId: string, boxId: string) => {
     if (!onUpdateRestoreBoxes) return;
     const region = image.regions.find(r => r.id === regionId);
@@ -691,6 +890,18 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
 
   const isOriginalMode = viewMode === 'original';
   const isRestoreActive = restoreMode && viewMode === 'result';
+
+  // A completed region's patch overlay shows when:
+  // - result view: always (all completed patches), unchanged
+  // - original (work) view: only for the selected region, when not previewing
+  //   the original and not mid-drag/resize (avoids anchor mismatch while the box moves)
+  const shouldShowPatchOverlay = (r: Region) => {
+    if (r.status !== 'completed' || !r.processedImageUrl) return false;
+    if (!isOriginalMode) return true;
+    const isManipulatingRegion =
+      (interaction.type === 'moving' || interaction.type === 'resizing') && interaction.regionId === r.id;
+    return selectedRegionId === r.id && !showOriginalPreview && !isManipulatingRegion;
+  };
 
   const imgW = image.originalWidth || 800;
   const imgH = image.originalHeight || 600;
@@ -724,7 +935,12 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
         <div
           ref={containerRef}
           className={`absolute shadow-xl ${isOriginalMode && !restoreMode ? '' : 'cursor-default'}`}
-          onMouseDown={isRestoreActive ? handleRestoreContainerMouseDown : (e) => {
+          onMouseDown={isRestoreActive ? handleRestoreContainerMouseDown : removeBrushMode ? (e) => {
+            // Brush remove: start painting a free-form removal mask
+            if (e.button !== 0) return;
+            if (e.altKey || spaceHeldRef.current) return;
+            setIsRemovePainting(true);
+          } : (e) => {
             // Block left-click background interaction when panning with space or alt
             if (e.button === 0 && (e.altKey || spaceHeldRef.current)) return;
             handleBackgroundMouseDown(e);
@@ -734,10 +950,19 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
             height: imgH,
             transformOrigin: '0 0',
             transform: `translate(${(vpW - imgW * zoom) / 2 + panX}px, ${(vpH - imgH * zoom) / 2 + panY}px) scale(${zoom})`,
-            cursor: isRestoreActive ? 'crosshair' : (isOriginalMode && interaction.type === 'drawing' ? 'crosshair' : 'default'),
+            cursor: isRestoreActive ? 'crosshair' : (removeBrushMode ? 'crosshair' : (isOriginalMode && interaction.type === 'drawing' ? 'crosshair' : 'default')),
             visibility: isZoomReady ? 'visible' : 'hidden',
           }}
         >
+          {/* Brush remove overlay: shows painted removal area in red */}
+          {removeBrushMode && (
+            <canvas
+              ref={(c) => { removeBrushOverlayRef.current = c; }}
+              className="absolute inset-0 pointer-events-none"
+              style={{ width: '100%', height: '100%', zIndex: 6 }}
+            />
+          )}
+
           {/* Base Image */}
           <img
             src={image.previewUrl}
@@ -747,8 +972,8 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
             draggable={false}
           />
 
-          {/* RESULT MODE: Processed image overlays */}
-          {!isOriginalMode && image.regions.filter(r => r.status === 'completed' && r.processedImageUrl).map((region) => {
+          {/* Processed image overlays (result view: all completed; work view: selected region only) */}
+          {image.regions.filter(shouldShowPatchOverlay).map((region) => {
             const ax = region.anchorX ?? region.x;
             const ay = region.anchorY ?? region.y;
             const aw = region.anchorWidth ?? region.width;
@@ -781,7 +1006,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
           {/* Regions */}
           {image.regions.map((region) => {
             const isSelected = selectedRegionId === region.id && isOriginalMode;
-            const isEditable = isOriginalMode && !disabled && region.status !== 'processing';
+            const isEditable = isOriginalMode && !disabled && region.status !== 'processing' && !removeBrushMode;
 
             const isManipulating = (interaction.type === 'moving' || interaction.type === 'resizing') && interaction.regionId === region.id;
 
@@ -1014,7 +1239,51 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
                           </button>
                       )}
-                      {!disabled && (region.status === 'completed' || region.status === 'failed') && (
+                      {!disabled && region.status === 'completed' && region.processedImageUrl && (
+                          <>
+                            {/* Toggle preview: adjusted <-> original (non-destructive) */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowOriginalPreview(v => !v);
+                              }}
+                              className={`w-6 h-6 border rounded-full flex items-center justify-center shadow-md hover:shadow-lg transition-all ${showOriginalPreview ? 'bg-amber-100 text-amber-600 border-amber-400' : 'bg-skin-surface text-skin-text border-skin-border'}`}
+                              title={showOriginalPreview ? t(language, 'showAdjusted') : t(language, 'showOriginal')}
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                            </button>
+                            {/* Commit current preview state: showing original -> real revert; showing patch -> bake into original */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (showOriginalPreview) {
+                                  resetRegion(region.id);
+                                  setShowOriginalPreview(false);
+                                } else if (onApplyRegionAsOriginal) {
+                                  onApplyRegionAsOriginal(image.id, region.id);
+                                  setShowOriginalPreview(false);
+                                }
+                              }}
+                              className={`w-6 h-6 border rounded-full flex items-center justify-center shadow-md hover:shadow-lg transition-all ${showOriginalPreview ? 'bg-rose-500 text-white border-rose-500' : 'bg-emerald-500 text-white border-emerald-500'}`}
+                              title={showOriginalPreview ? t(language, 'confirmRevert') : t(language, 'applyRegionAsOriginal')}
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+                            </button>
+                          </>
+                      )}
+                       {!disabled && onRemoveRegionWithIopaint && region.status !== 'processing' && (
+                           <button
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               onRemoveRegionWithIopaint!(image.id, region.id);
+                             }}
+                             className="w-6 h-6 bg-skin-surface text-skin-text border border-skin-border rounded-full flex items-center justify-center shadow-md hover:shadow-lg hover:bg-skin-fill transition-all"
+                             title={t(language, 'iopaintRemove')}
+                           >
+                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
+                           </button>
+                       )}
+                       {!disabled && region.status === 'failed' && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1103,12 +1372,36 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
       </div>
 
       {/* Zoom controls */}
-      {isOriginalMode && !restoreMode && (
+      {isOriginalMode && !restoreMode && !removeBrushMode && (
         <div className="absolute bottom-4 right-4 flex gap-1 z-40">
           <button onClick={handleZoomOut} className="w-7 h-7 bg-skin-surface border border-skin-border rounded flex items-center justify-center text-sm hover:bg-skin-fill transition" title="Zoom Out">−</button>
           <span className="w-12 h-7 bg-skin-surface border border-skin-border rounded flex items-center justify-center text-[10px] font-mono">{Math.round(zoom * 100)}%</span>
           <button onClick={handleZoomIn} className="w-7 h-7 bg-skin-surface border border-skin-border rounded flex items-center justify-center text-sm hover:bg-skin-fill transition" title="Zoom In">+</button>
           <button onClick={handleZoomReset} className="w-7 h-7 bg-skin-surface border border-skin-border rounded flex items-center justify-center text-[10px] hover:bg-skin-fill transition" title="Fit to Screen">⊡</button>
+        </div>
+      )}
+
+      {/* Brush remove toolbar */}
+      {removeBrushMode && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-skin-surface/95 border border-skin-border rounded-full px-4 py-2 shadow-lg">
+          <span className="text-[10px] font-bold text-skin-muted">{t(language, 'removeBrushModeDesc')}</span>
+          <span className="text-[9px] text-skin-muted ml-1">大小</span>
+          <input type="range" min="1" max="20" step="0.5" value={brushRemoveSize}
+            onChange={(e) => setBrushRemoveSize(Number(e.target.value))}
+            className="w-16 h-1 accent-rose-500" />
+          <span className="text-[9px] text-skin-muted w-4">{brushRemoveSize}</span>
+          <button
+            onClick={executeRemoveBrush}
+            className="px-3 py-1 text-[11px] font-bold rounded-full bg-rose-500 text-white hover:bg-rose-600 transition-all"
+          >{t(language, 'executeRemoveBrush')}</button>
+          <button
+            onClick={clearRemoveBrush}
+            className="px-2 py-1 text-[10px] font-bold rounded-full bg-skin-surface text-skin-text border border-skin-border hover:bg-skin-fill transition-all"
+          >{t(language, 'clearRemoveBrush')}</button>
+          <button
+            onClick={onExitRemoveBrush}
+            className="px-2 py-1 text-[10px] font-bold rounded-full bg-skin-surface text-skin-muted border border-skin-border hover:bg-skin-fill transition-all"
+          >✕</button>
         </div>
       )}
     </div>

@@ -55,7 +55,7 @@ return true; // result 视图：全部 completed（不变）
   - **切换预览**（沿用现有环形箭头 SVG 与样式基础）：`onClick={() => setShowOriginalPreview(v => !v)}`。`showOriginalPreview === true` 时高亮（如 `bg-amber-100 text-amber-600 border-amber-400`，与 contextOnly 高亮风格一致），title 随状态切换（"显示调整后" / "显示调整前"）。**不破坏数据**。
   - **✅ 提交**（新增绿色对勾按钮）：`onClick` →
     - `showOriginalPreview === true`：执行 `resetRegion(region.id)`（`status→pending`、清 `processedImageUrl`/`restoreBoxes`，同现有 507-516），并 `setShowOriginalPreview(false)`。title："确认恢复原图（删除补丁）"，样式用警示色提示破坏性。
-    - `showOriginalPreview === false`：确认保留，无破坏动作，保持选中与补丁显示。title："确认保留调整"。
+    - `showOriginalPreview === false`：**应用调整为新原图**（作用域=当前选区，已与用户确认）——App 侧 `handleApplyRegionAsOriginalWrapper` 用 `stitchImage(img.originalUrl, [region])` 拼合（基图用 originalUrl 保全分辨率），再调 `handleApplyRegionAsOriginal`（useImageManager）：`originalUrl`/`previewUrl`/`finalResultUrl` 更新为拼合结果，该选区回 pending（清补丁/还原框/还原掩码/锚点），**推入历史快照可撤销**，其他选区不动。title："应用调整为新原图"。
 - **failed 选区**：保留原环形箭头直接重置按钮（行为不变，清错误回 pending）。
 
 新按钮 title 文案：走 `services/translations.ts` 的 `t(language, key)`，zh/en 双语各加 key（区别于既有硬编码英文 title 的旧按钮，新交互保持双语一致）。
@@ -81,7 +81,7 @@ return true; // result 视图：全部 completed（不变）
 - 方案 B（补丁完成后自动切全局 result 视图、result 模式开放选区交互）——改动面大、批量 AI 视图跳变，不采用。
 - AI 生成完成自动选中抢焦点——批量时打断操作。
 - 切换状态持久化到 Region/历史/MCP 快照——纯视图偏好，本地 state 足够。
-- ✅"确认保留"写入历史快照/新增撤销点——与现有手动补丁路径一致（写当前快照），不扩展。
+- 整图"应用为原图"从选区 ✅ 触发——作用域只烙当前选区，避免误清其他未完成选区；整图操作仍走侧边栏按钮。
 
 ## 验证方式
 
@@ -90,7 +90,7 @@ return true; // result 视图：全部 completed（不变）
   1. 上传图框选选区 → 手动编辑器涂改保存 → **不点"已完成"**，画布直接显示调整后内容，工具栏出现切换 + ✅。
   2. 点环形箭头 → 切到"调整前"（原图内容、按钮高亮）→ 再点 → 切回调整后；来回切换无数据变化。
   3. 切到"调整前"状态点 ✅ → 补丁删除、选区回 pending、可重新生成；undo 可恢复。
-  4. 切到"调整后"状态点 ✅ → 补丁保留、无破坏。
+  4. 切到"调整后"状态点 ✅ → 该选区补丁烙进原图成为新基图（画布基图更新、暗色补丁内容可见），选区回 pending；undo 可恢复补丁与旧基图。
   5. AI 单选区生成 → 生成中选区仍选中，完成后补丁直接显示。
   6. 拖拽/缩放已 completed 选区 → 补丁层临时隐藏，操作结束恢复。
   7. 下载/应用为原图 → 拼合结果与既有行为一致。

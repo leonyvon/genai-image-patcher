@@ -51,9 +51,6 @@ const SECTION_STORAGE_KEY = 'genai_patcher_sidebar_sections_v1';
 const THEMES: { id: ThemeType; label: string; bg: string; ring: string }[] = [
   { id: 'light', label: 'Light', bg: 'bg-slate-100', ring: 'ring-slate-400' },
   { id: 'dark', label: 'Dark', bg: 'bg-zinc-800', ring: 'ring-zinc-500' },
-  { id: 'ocean', label: 'Blue', bg: 'bg-sky-400', ring: 'ring-sky-300' },
-  { id: 'rose', label: 'Rose', bg: 'bg-rose-400', ring: 'ring-rose-300' },
-  { id: 'forest', label: 'Green', bg: 'bg-emerald-400', ring: 'ring-emerald-300' },
 ];
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -143,6 +140,10 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const isProcessing = processingState !== ProcessingStep.IDLE && processingState !== ProcessingStep.DONE;
   const hasCompletedImages = images.some(img => img.regions.some(r => r.status === 'completed') || img.finalResultUrl);
+  // 有效参考图列表（过滤孤儿残留）：编号/请求统一基于此，孤儿条目不占 [image N] 号
+  const effectiveReferenceImages = config.grsaiReferenceImages.filter((b64) =>
+    images.some((img) => img.referenceBase64 === b64)
+  );
   const processableImages = images.filter(img => !isEffectiveReference(img, config.grsaiReferenceImages));
   const downloadCount = hasCompletedImages 
       ? processableImages.filter(img => img.regions.some(r => r.status === 'completed') || img.isSkipped).length 
@@ -301,7 +302,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <div className="pr-16">
-           <h1 className="font-bold text-xl text-skin-primary tracking-tight">{t(lang, 'appTitle')}</h1>
+           <h1 className="font-bold text-xl text-skin-text tracking-tight">{t(lang, 'appTitle')}</h1>
            <p className="text-[10px] text-skin-muted uppercase tracking-wider">{t(lang, 'appSubtitle')}</p>
         </div>
         
@@ -450,9 +451,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                           </button>
 
-                          {img.isReference && img.referenceBase64 && config.grsaiReferenceImages.indexOf(img.referenceBase64) >= 0 && (
+                          {img.isReference && img.referenceBase64 && effectiveReferenceImages.includes(img.referenceBase64) && (
                              <span className="absolute bottom-1 left-1 px-1 rounded bg-amber-500 text-white text-[9px] font-bold z-10 shadow-sm">
-                                [image {config.grsaiReferenceImages.indexOf(img.referenceBase64) + 2}]
+                                [image {effectiveReferenceImages.indexOf(img.referenceBase64) + 2}]
                              </span>
                           )}
 
@@ -558,31 +559,29 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 placeholder={t(lang, 'promptFullImagePlaceholder')}
                            />
                        </>
+                    ) : currentImage.regions.length > 0 ? (
+                       <div className="space-y-3">
+                          {currentImage.regions.map((region, index) => (
+                             <div key={region.id}>
+                                <label className="text-[10px] uppercase font-bold text-skin-muted mb-1 block flex items-center gap-2">
+                                   <span>{t(lang, 'promptRegionsLabel')} {index + 1}</span>
+                                   <span className="px-1.5 py-0.5 rounded-full bg-skin-fill text-skin-primary font-mono normal-case truncate max-w-[100px] border border-skin-border">
+                                   ID: {region.id.slice(0, 4)}
+                                   </span>
+                                </label>
+                                 <textarea 
+                                    value={region.customPrompt || ''}
+                                    onChange={(e) => onUpdateRegionPrompt(currentImage.id, region.id, e.target.value)}
+                                    className="w-full h-16 p-2 text-xs border border-skin-border rounded-lg bg-skin-surface focus:ring-1 focus:ring-skin-primary focus:border-skin-primary transition-all resize-none shadow-sm"
+                                    placeholder={t(lang, 'promptSpecificPlaceholder')}
+                                 />
+                             </div>
+                          ))}
+                       </div>
                     ) : (
-                       <>
-                           <label className="text-[10px] uppercase font-bold text-skin-muted mb-1 block flex items-center gap-2">
-                                {t(lang, 'promptSpecificLabel')}
-                                {selectedRegion && (
-                                    <span className="px-1.5 py-0.5 rounded-full bg-skin-fill text-skin-primary font-mono normal-case truncate max-w-[100px] border border-skin-border">
-                                    ID: {selectedRegion.id.slice(0, 4)}
-                                    </span>
-                                )}
-                           </label>
-                           
-                           {selectedRegion ? (
-                                <textarea 
-                                key={selectedRegion.id} 
-                                value={selectedRegion.customPrompt || ''}
-                                onChange={(e) => onUpdateRegionPrompt(currentImage.id, selectedRegion.id, e.target.value)}
-                                className="w-full h-16 p-2 text-xs border border-skin-border rounded-lg bg-skin-surface focus:ring-1 focus:ring-skin-primary focus:border-skin-primary transition-all resize-none shadow-sm animate-in fade-in"
-                                placeholder={t(lang, 'promptSpecificPlaceholder')}
-                                />
-                           ) : (
-                                <div className="w-full h-16 p-2 text-xs border border-dashed border-skin-border rounded-lg bg-skin-fill/20 flex items-center justify-center text-skin-muted text-center italic">
-                                Select a region to customize its prompt
-                                </div>
-                           )}
-                       </>
+                       <div className="w-full h-16 p-2 text-xs border border-dashed border-skin-border rounded-lg bg-skin-fill/20 flex items-center justify-center text-skin-muted text-center italic">
+                       Select a region to customize its prompt
+                       </div>
                     )}
                  </div>
                )}
@@ -598,6 +597,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 onFetchModels={handleFetchOpenAIModels}
                 modelList={modelList}
                 isLoadingModels={isLoadingModels}
+                referenceImages={effectiveReferenceImages}
              />
           </Section>
         )}

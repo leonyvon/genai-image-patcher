@@ -1,5 +1,5 @@
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { AppConfig, ProcessingStep, UploadedImage, Region } from '../types';
 import { loadImage, createMultiMaskedFullImage, createInvertedMultiMaskedFullImage, cropRegion, padImageToSquare, depadImageByRatio, depadImageFromSquare, stitchImageInverted, extractCropFromFullImage, compressImageToTargetSize, PaddingInfo, urlToBase64, base64ToObjectURLAsync, releaseObjectURL, isEffectiveReference } from '../services/imageUtils';
 import { generateRegionEdit, generateTranslation } from '../services/aiService';
@@ -47,6 +47,18 @@ export function useImageProcessor(
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [isDetecting, setIsDetecting] = useState(false);
     const abortControllerRef = useRef<AbortController | null>(null);
+
+    // 有效参考图列表：config 中仍被图库图片引用的条目（过滤孤儿残留）。
+    // AI 请求基于此列表组装 images[]——保证 prompt 里的 [image N] 与实际数组位置一致，
+    // 且孤儿条目不占编号、不发给模型。
+    const aiConfig = useMemo<AppConfig>(() => {
+        const effectiveRefs = config.grsaiReferenceImages.filter((b64) =>
+            images.some((img) => img.referenceBase64 === b64)
+        );
+        return effectiveRefs.length === config.grsaiReferenceImages.length
+            ? config
+            : { ...config, grsaiReferenceImages: effectiveRefs };
+    }, [config, images]);
 
     const handleStop = () => {
         if (abortControllerRef.current) {
@@ -165,7 +177,7 @@ export function useImageProcessor(
                        translationText = imageCachedTranslation;
                    } else {
                        setProcessingState(ProcessingStep.API_CALLING);
-                       translationText = await generateTranslation(await getTranslationBase64(), config, signal);
+                        translationText = await generateTranslation(await getTranslationBase64(), aiConfig, signal);
 
                        // Persist translation back into image.customPrompt for reuse next run.
                        if (translationText) {
@@ -186,7 +198,7 @@ export function useImageProcessor(
                 if (translationText) {
                     effectivePrompt += `\n\n${TRANSLATION_CACHE_MARKER}\n${translationText}`;
                 }
-                let apiResultBase64 = await generateRegionEdit(await getRedrawBase64(), effectivePrompt, config, signal);
+                let apiResultBase64 = await generateRegionEdit(await getRedrawBase64(), effectivePrompt, aiConfig, signal);
                 translationBase64 = null;
                 redrawBase64 = null;
                 // apiResultBase64 is a data:image/... string from the API
@@ -385,7 +397,7 @@ export function useImageProcessor(
                    } else {
                        setProcessingState(ProcessingStep.API_CALLING);
                        const contextBase64 = maskedContextUrl ? await urlToBase64(maskedContextUrl) : undefined;
-                       translationText = await generateTranslation(await getTranslationBase64(), config, signal, contextBase64);
+                       translationText = await generateTranslation(await getTranslationBase64(), aiConfig, signal, contextBase64);
 
                        // Persist the translation back into region.customPrompt so the
                        // textarea reflects the cached value and next run reuses it.
@@ -420,7 +432,7 @@ export function useImageProcessor(
                 if (translationText) {
                     effectivePrompt += `\n\n${TRANSLATION_CACHE_MARKER}\n${translationText}`;
                 }
-                let apiResultBase64 = await generateRegionEdit(await getRedrawBase64(), effectivePrompt, config, signal);
+                let apiResultBase64 = await generateRegionEdit(await getRedrawBase64(), effectivePrompt, aiConfig, signal);
                 translationBase64 = null; // release reference; let the big string GC
                 redrawBase64 = null;
 
@@ -511,7 +523,7 @@ export function useImageProcessor(
             : (selectedImage && !isEffectiveReference(selectedImage, config.grsaiReferenceImages) ? [selectedImage] : []);
         if (targets.length === 0) {
             setProcessingState(ProcessingStep.IDLE);
-            return;
+            return ProcessingStep.IDLE;
         }
         const actualLimit = config.executionMode === 'serial' ? 1 : config.concurrencyLimit;
         const globalSemaphore = new AsyncSemaphore(actualLimit);
@@ -536,11 +548,13 @@ export function useImageProcessor(
                 playCompletionSound();
             }
             setProcessingState(ProcessingStep.DONE);
+            return ProcessingStep.DONE;
         } catch (e: any) {
             if (e.name !== 'AbortError') {
                  setErrorMsg(e.message || "Unknown error occurred");
             }
             setProcessingState(ProcessingStep.IDLE);
+            return ProcessingStep.IDLE;
         }
     };
 

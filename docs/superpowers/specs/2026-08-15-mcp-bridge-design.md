@@ -66,7 +66,7 @@
 
 `upload` / `select_image` / `mark_reference` / `unmark_reference` / `set_prompt` / `generate` / `get_image`
 
-- **异步命令**：`generate` 立即返回"已触发"，Agent 轮询 `get_status.processingState` 至 `IDLE`；`get_image` 为请求-响应（应用把结果 blob 转 base64 经 WS 回传，MCP 落盘）
+- **阻塞命令**：`generate` **阻塞至生成完成才返回**（结果含 `processingState`：DONE=正常/IDLE=出错停止；单次最长 10 分钟，bridge 与 MCP httpx 超时均已放宽）；`get_image` 为请求-响应（应用把结果 blob 转 base64 经 WS 回传，MCP 落盘）
 
 ## MCP 工具清单（FastMCP）
 

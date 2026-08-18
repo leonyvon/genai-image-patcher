@@ -3,7 +3,7 @@ import { Language } from "../types";
 
 export const translations = {
   zh: {
-    appTitle: "AI 图像修补 Pro",
+    appTitle: "Regenerator",
     appSubtitle: "AI 局部重绘工具",
     
     // Upload
@@ -51,10 +51,17 @@ export const translations = {
     promptTitle: "提示词",
     promptGlobalLabel: "全局默认提示词",
     promptSpecificLabel: "当前选中选区提示词", 
-    promptFullImageLabel: "当前图片专用提示词 (全图模式)",
+    promptRegionsLabel: "选区",    promptFullImageLabel: "当前图片专用提示词 (全图模式)",
     promptPlaceholder: "描述你想要修改的内容 (例如: 去除水印, 换成蓝天)...",
     promptSpecificPlaceholder: "在此追加针对此区域的额外细节描述...", 
     promptFullImagePlaceholder: "在此覆盖针对此整张图片的专用描述...",
+    iopaintRemove: "本地移除 (IOPaint)",
+    iopaintRemoveDesc: "用本地 LaMa 模型移除选区内容并填充背景，不消耗 API 额度",
+    iopaintUrl: "IOPaint 服务地址",
+    removeBrushMode: "🖌 涂抹移除",
+    removeBrushModeDesc: "在图上涂抹要移除的内容，点击执行后由本地 LaMa 填充背景",
+    executeRemoveBrush: "执行移除",
+    clearRemoveBrush: "清除",
     
     // Settings
     settingsTitle: "连接设置",
@@ -163,7 +170,15 @@ export const translations = {
     
     // Canvas
     readyToCreate: "准备开始",
+    viewEdit: "编辑",
+    viewPreview: "预览",
     uploadHint: "通过左侧上传图片，或直接粘贴 (Ctrl+V)",
+
+    // Region Preview Toggle
+    showAdjusted: "显示调整后",
+    showOriginal: "显示调整前",
+    applyRegionAsOriginal: "应用调整为新原图",
+    confirmRevert: "确认恢复原图（删除补丁）",
     
     // Global Settings
     globalSettings: "全局设置",
@@ -177,6 +192,8 @@ export const translations = {
     enableManualEditorDesc: "启用画笔涂抹和文字嵌字工具",
     enableVerticalTextDefault: "默认竖排文字",
     enableVerticalTextDefaultDesc: "新建文本框时默认开启【竖排】选项",
+    enablePanelSnap: "框选吸附",
+    enablePanelSnapDesc: "拖框松手时自动吸附到最近的格线",
     useFullImageMasking: "使用全图遮罩模式",
     useFullImageMaskingDesc: "发送除选区外全白的整张图片给 API，而非仅发送裁剪切片。这能提供更好的上下文，并大幅减少 API 调用次数。",
     useInvertedMasking: "反向遮罩模式 (重绘背景)",
@@ -258,7 +275,7 @@ export const translations = {
     help_tricks_4_desc: "上传按钮旁边的文件夹图标，支持一次性导入整个目录的数百张图片。",
   },
   en: {
-    appTitle: "GenAI Patcher Pro",
+    appTitle: "Regenerator",
     appSubtitle: "AI Inpainting Tool",
     
     // Upload
@@ -306,10 +323,18 @@ export const translations = {
     promptTitle: "Prompt",
     promptGlobalLabel: "Global Default Prompt",
     promptSpecificLabel: "Current Region Prompt", 
+    promptRegionsLabel: "Region",
     promptFullImageLabel: "Full Image Specific Prompt",
     promptPlaceholder: "Describe the edit...",
     promptSpecificPlaceholder: "Append specific details for this region...", 
     promptFullImagePlaceholder: "Override details for this specific image...",
+    iopaintRemove: "Remove (local IOPaint)",
+    iopaintRemoveDesc: "Erase the region content with local LaMa and fill the background — no API credits used",
+    iopaintUrl: "IOPaint server URL",
+    removeBrushMode: "🖌 Brush Erase",
+    removeBrushModeDesc: "Paint over content to erase; local LaMa fills the background on execute",
+    executeRemoveBrush: "Erase",
+    clearRemoveBrush: "Clear",
     
     // Settings
     settingsTitle: "Connection Settings",
@@ -418,7 +443,15 @@ export const translations = {
     
     // Canvas
     readyToCreate: "Ready to Create",
+    viewEdit: "Edit",
+    viewPreview: "Preview",
     uploadHint: "Upload via sidebar or paste from clipboard (Ctrl+V)",
+
+    // Region Preview Toggle
+    showAdjusted: "Show adjusted",
+    showOriginal: "Show original",
+    applyRegionAsOriginal: "Apply adjustment as original",
+    confirmRevert: "Confirm revert (delete patch)",
     
     // Global Settings
     globalSettings: "Global Settings",
@@ -432,6 +465,8 @@ export const translations = {
     enableManualEditorDesc: "Enable brush and typesetting tools",
     enableVerticalTextDefault: "Default Vertical Text",
     enableVerticalTextDefaultDesc: "New text boxes default to Vertical orientation",
+    enablePanelSnap: "Panel Snap",
+    enablePanelSnapDesc: "Snap drawn regions to the nearest panel border",
     useFullImageMasking: "Use Full Image Masking",
     useFullImageMaskingDesc: "Send masked full image to API instead of crops. Reduces API calls and provides better context.",
     useInvertedMasking: "Inverted Masking (Repaint Background)",

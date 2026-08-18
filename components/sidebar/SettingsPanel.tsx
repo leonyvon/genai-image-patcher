@@ -9,6 +9,8 @@ interface SettingsPanelProps {
     onFetchModels: () => void;
     modelList: string[];
     isLoadingModels: boolean;
+    /** 有效参考图列表（图库当前引用的，已过滤孤儿）——编号与请求基于此，从 [image 2] 起紧凑编号。 */
+    referenceImages?: string[];
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({ 
@@ -16,7 +18,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     onChange, 
     onFetchModels, 
     modelList, 
-    isLoadingModels 
+    isLoadingModels, 
+    referenceImages 
 }) => {
     const lang = config.language;
     const [showModelDropdown, setShowModelDropdown] = useState(false);
@@ -189,16 +192,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <div className="animate-in fade-in slide-in-from-top-3 pt-2 mt-2 border-t border-skin-border/50">
                         <label className="text-[10px] uppercase font-bold text-skin-muted mb-1 block">Reference Images</label>
                         <p className="text-[10px] text-skin-muted mb-2 leading-tight">[image 1] is the region slice; references start at [image 2]. Mark images in the gallery with the star to add.</p>
-                        {config.grsaiReferenceImages.length === 0 ? (
+                        {(referenceImages ?? config.grsaiReferenceImages).length === 0 ? (
                             <p className="text-[10px] text-skin-muted italic">No reference images yet.</p>
                         ) : (
                             <div className="flex flex-wrap gap-2">
-                                {config.grsaiReferenceImages.map((b64, i) => (
+                                {(referenceImages ?? config.grsaiReferenceImages).map((b64, i) => (
                                     <div key={i} className="relative w-14 h-14 rounded-lg overflow-hidden border border-skin-border bg-skin-fill group">
                                         <img src={b64} className="w-full h-full object-cover" alt={`reference ${i + 2}`} />
                                         <span className="absolute bottom-0.5 left-0.5 px-1 rounded bg-amber-500 text-white text-[8px] font-bold">{`[image ${i + 2}]`}</span>
                                         <button
-                                            onClick={() => onChange('grsaiReferenceImages', (arr: string[]) => arr.filter((_, idx) => idx !== i))}
+                                            onClick={() => onChange('grsaiReferenceImages', (arr: string[]) => arr.filter((item) => item !== b64))}
                                             className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/60 text-white text-[9px] leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                                             title="Remove reference"
                                         >✕</button>

@@ -300,6 +300,71 @@ export function useImageManager(performanceMode: PerformanceMode) {
         regions: newState.regions,
         finalResultUrl: stitchedUrl,
         fullAiResultUrl: undefined,
+      history: newHistory,
+      historyIndex: newIndex,
+      };
+    });
+    setViewMode('original');
+  }, [updateImage]);
+
+  // Scoped "apply as original": bake ONE region's patch into the base image
+  // (full-resolution stitch of originalUrl + that region only), then reset that
+  // region to pending so it can be re-edited. Other regions are untouched.
+  // Mirrors handleApplyResultAsOriginal but keeps regions and the patch box.
+  const handleApplyRegionAsOriginal = useCallback((imageId: string, regionId: string, stitchedUrl: string) => {
+    updateImage(imageId, (img) => {
+      const newRegions = img.regions.map((r) =>
+        r.id === regionId
+          ? {
+              ...r,
+              status: 'pending' as const,
+              processedImageUrl: undefined,
+              restoreBoxes: undefined,
+              restoreMaskUrl: undefined,
+              anchorX: undefined,
+              anchorY: undefined,
+              anchorWidth: undefined,
+              anchorHeight: undefined,
+            } as Region
+          : r
+      );
+
+      const newState: ImageHistoryState = {
+        previewUrl: stitchedUrl,
+        regions: newRegions,
+        finalResultUrl: stitchedUrl,
+        width: img.originalWidth,
+        height: img.originalHeight,
+        fullAiResultUrl: undefined,
+        originalUrl: stitchedUrl,
+      };
+
+      const newHistory = img.history.slice(0, img.historyIndex + 1);
+      newHistory.push(newState);
+
+      while (newHistory.length > MAX_HISTORY_ENTRIES) {
+        const evicted = newHistory.shift();
+        if (evicted) {
+          releaseObjectURL(evicted.previewUrl);
+          releaseObjectURL(evicted.fullAiResultUrl);
+          releaseObjectURL(evicted.finalResultUrl);
+          releaseObjectURL(evicted.originalUrl);
+          evicted.regions.forEach((r) => {
+            releaseObjectURL(r.processedImageUrl);
+            releaseObjectURL(r.restoreMaskUrl);
+          });
+        }
+      }
+
+      const newIndex = Math.min(img.historyIndex + 1, newHistory.length - 1);
+
+      return {
+        ...img,
+        previewUrl: stitchedUrl,
+        originalUrl: stitchedUrl,
+        regions: newRegions,
+        finalResultUrl: stitchedUrl,
+        fullAiResultUrl: undefined,
         history: newHistory,
         historyIndex: newIndex,
       };
@@ -366,6 +431,7 @@ export function useImageManager(performanceMode: PerformanceMode) {
     handleDeleteImage,
     handleClearAllImages,
     handleApplyResultAsOriginal,
+    handleApplyRegionAsOriginal,
     handleUndoImage,
     handleRedoImage,
     getStitchedUrl

@@ -66,7 +66,7 @@ def _cmd(action: str, params: dict | None = None) -> dict:
         r = httpx.post(
             f"{BRIDGE_URL}/command",
             json={"action": action, "params": params or {}},
-            timeout=180,
+            timeout=600,  # 需覆盖 generate 阻塞等待（最长 10 分钟）
             trust_env=False,
         )
         r.raise_for_status()
@@ -81,6 +81,14 @@ def _ok(data) -> str:
 
 def _err(msg: str) -> str:
     return f"Error: {msg}"
+
+
+def _refs_sorted(state: dict) -> list[str]:
+    """当前有效参考图 id，按 referenceOrder 升序。签名与门禁均基于此。"""
+    refs = [(img.get("referenceOrder") or 0, img.get("id"))
+            for img in state.get("images", []) if img.get("isReference")]
+    refs.sort()
+    return [i for _, i in refs]
 
 
 @mcp.tool()
@@ -159,8 +167,89 @@ def set_prompt(prompt: str, image_id: str | None = None, region_id: str | None =
 
 
 @mcp.tool()
+def get_image(image_id: str, output_path: str) -> str:
+    """把图库中任意一张原图（含参考图）保存为本地文件并返回路径——供目检参考图内容、判断是否仍适用于本次任务。注意：output_path 必须用独立/临时路径。"""
+    if not _ensure_bridge():
+        return _err("桥接服务不可达")
+    res = _cmd("get_image", {"image_id": image_id})
+    if not res.get("ok"):
+        return _err(str(res.get("error")))
+    result = res.get("result") or {}
+    b64 = result.get("base64")
+    if not b64:
+        return _err("未获得图片数据")
+    try:
+        out = Path(output_path).expanduser()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(base64.b64decode(b64))
+    except Exception as e:
+        return _err(f"写文件失败: {e}")
+    return _ok({"path": str(out), "mime": result.get("mime", "image/png"), "kind": result.get("kind", "original")})
+
+
+@mcp.tool()
+def review_references(task_description: str, keep: list[str] | None = None, remove: list[str] | None = None, add: list[str] | None = None) -> str:
+    """【generate 前置必调】校准参考图：声明本次任务的参考图集合。
+    task_description=本次任务一句话描述；keep=保留的参考图 id；remove=删除的参考图 id；add=新增标记的参考图 id。
+    keep+remove 必须恰好覆盖当前所有参考图（漏一张即报错）。校准后 generate 才放行；参考图有任何变动都需重新校准。
+    校准为一次性：仅当 generate 实际开始生成后才被消耗，下次 generate 需重新校准；API 失败/未开始生成不消耗，可直接重试。"""
+    if not _ensure_bridge():
+        return _err("桥接服务不可达")
+    keep = keep or []
+    remove = remove or []
+    add = add or []
+    if not task_description or not task_description.strip():
+        return _err("task_description 必填：一句话说明本次任务，用于与上次校准对比")
+    try:
+        state = _get()
+    except Exception as e:
+        return _err(str(e))
+    current = _refs_sorted(state)
+    cur_set, keep_set, remove_set = set(current), set(keep), set(remove)
+    unhandled = cur_set - keep_set - remove_set
+    if unhandled:
+        return _err(f"参考图未全部决策，漏了 {len(unhandled)} 张: {sorted(unhandled)}。keep+remove 必须覆盖当前所有参考图: {current}")
+    conflict = keep_set & remove_set
+    if conflict:
+        return _err(f"keep 与 remove 重叠: {sorted(conflict)}")
+    # 应用删除
+    for rid in remove:
+        if rid in cur_set:
+            res = _cmd("unmark_reference", {"image_id": rid})
+            if not res.get("ok"):
+                return _err(f"删除参考图失败 {rid}: {res.get('error')}")
+    # 应用新增
+    for aid in add:
+        res = _cmd("mark_reference", {"image_id": aid})
+        if not res.get("ok"):
+            return _err(f"新增参考图失败 {aid}: {res.get('error')}")
+    # 等待快照防抖稳定（~300ms）后取新签名
+    time.sleep(0.6)
+    try:
+        state2 = _get()
+    except Exception as e:
+        return _err(str(e))
+    sig = json.dumps(_refs_sorted(state2), ensure_ascii=False, separators=(",", ":"))  # 紧凑 JSON，与 bridge refSignature 的 JSON.stringify 一致
+    res = _cmd("set_calibration", {"signature": sig, "task": task_description})
+    if not res.get("ok"):
+        return _err(f"记录校准失败: {res.get('error')}")
+    final_refs = [(img.get("referenceOrder") or 0, img.get("id"))
+                  for img in state2.get("images", []) if img.get("isReference")]
+    final_refs.sort()
+    return _ok({
+        "calibrated": True,
+        "task": task_description,
+        "signature": sig,
+        "references": [{"id": i, "referenceOrder": o, "imageIndex": o + 1} for o, i in final_refs],
+    })
+
+
+@mcp.tool()
 def generate(scope: str = "single") -> str:
-    """触发生成。scope: 'single'（当前选中图）或 'all'（全部未跳过图）。立即返回，轮询 get_status 的 processingState 直到 IDLE。"""
+    """触发生成并**阻塞等待完成**。scope: 'single'（当前选中图）或 'all'（全部未跳过图）。
+    正常完成返回 ok 且 result.processingState='DONE'；出错/被停止为 'IDLE'。单次调用最长等待 10 分钟。
+    **参考图门禁**：若存在参考图且未先调用 review_references 校准（或校准后参考图有变动），本工具会直接报错，必须先校准。
+    校准为一次性：每次实际开始生成后即被消耗，下次 generate 需重新校准；API 失败/未开始生成不消耗，可直接重试。"""
     if not _ensure_bridge():
         return _err("桥接服务不可达")
     res = _cmd("generate", {"scope": scope})

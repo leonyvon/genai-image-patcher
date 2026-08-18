@@ -20,7 +20,8 @@ export function useCanvasInteraction(
     onSelectRegion: (id: string | null) => void,
     onInteractionStart?: () => void,
     viewMode: 'original' | 'result' = 'original',
-    disabled: boolean = false
+    disabled: boolean = false,
+    snapDrawnRegion?: (rect: { x: number; y: number; width: number; height: number }) => { x: number; y: number; width: number; height: number }
 ) {
     const [interaction, setInteraction] = useState<InteractionState>({ type: 'idle', startPos: { x: 0, y: 0 } });
 
@@ -29,11 +30,13 @@ export function useCanvasInteraction(
     const imageRef = useRef(image);
     const onUpdateRegionsRef = useRef(onUpdateRegions);
     const onSelectRegionRef = useRef(onSelectRegion);
+    const snapDrawnRegionRef = useRef(snapDrawnRegion);
 
     useEffect(() => { interactionRef.current = interaction; }, [interaction]);
     useEffect(() => { imageRef.current = image; }, [image]);
     useEffect(() => { onUpdateRegionsRef.current = onUpdateRegions; }, [onUpdateRegions]);
     useEffect(() => { onSelectRegionRef.current = onSelectRegion; }, [onSelectRegion]);
+    useEffect(() => { snapDrawnRegionRef.current = snapDrawnRegion; }, [snapDrawnRegion]);
 
     const getRelativeCoords = (clientX: number, clientY: number) => {
         if (!containerRef.current) return { x: 0, y: 0 };
@@ -164,12 +167,16 @@ export function useCanvasInteraction(
             if (state.type === 'drawing' && state.currentRect) {
                 const { x, y, width, height } = state.currentRect;
                 if (width && height && width > 0.5 && height > 0.5) {
+                    // Panel snap: if a snap callback is provided, snap the drawn
+                    // rect to nearby panel borders before creating the region.
+                    const snap = snapDrawnRegionRef.current;
+                    const snapped = snap ? snap({ x: x || 0, y: y || 0, width: width || 0, height: height || 0 }) : null;
                     const newRegion: Region = {
                         id: crypto.randomUUID(),
-                        x: x || 0,
-                        y: y || 0,
-                        width: width || 0,
-                        height: height || 0,
+                        x: snapped ? snapped.x : (x || 0),
+                        y: snapped ? snapped.y : (y || 0),
+                        width: snapped ? snapped.width : (width || 0),
+                        height: snapped ? snapped.height : (height || 0),
                         type: 'rect',
                         status: 'pending',
                         source: 'manual',

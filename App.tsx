@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar';
 import EditorCanvas from './components/EditorCanvas';
 import type { TextObject } from './components/PatchEditor';
 import { loadImage, cropRegion, stitchImage, createInvertedMultiMaskedFullImage, extractCropFromFullImage, stitchImageInverted, releaseObjectURL, compressImageToTargetSize, urlToBase64, isEffectiveReference, flipImageHorizontal } from './services/imageUtils';
+import { removeRegionWithIopaint, inpaintWithMask } from './services/iopaintService';
 import { fetchOpenAIModels } from './services/aiService';
 import { recognizeText } from './services/detectionService';
 import { t } from './services/translations';
@@ -44,6 +45,7 @@ export default function App() {
     handleDeleteImage,
     handleClearAllImages,
     handleApplyResultAsOriginal,
+    handleApplyRegionAsOriginal,
     handleUndoImage,
     handleRedoImage,
     getStitchedUrl
@@ -103,7 +105,11 @@ export default function App() {
         alert('参考图总大小超过 localStorage 配额（约 4.5MB），未添加。请在设置面板删除部分参考图。');
         return;
       }
-      setConfig(prev => ({ ...prev, grsaiReferenceImages: [...prev.grsaiReferenceImages, b64] }));
+      setConfig(prev => {
+        // 标记时顺带清理孤儿：只保留图库仍引用的条目，再 append 新图——防止刷新/清空遗留无限累积
+        const alive = prev.grsaiReferenceImages.filter((item) => images.some((img) => img.referenceBase64 === item));
+        return { ...prev, grsaiReferenceImages: [...alive, b64] };
+      });
       updateImage(imageId, i => ({ ...i, isReference: true, referenceBase64: b64 }));
     } catch (e) {
       console.warn('Failed to add reference image:', e);
@@ -127,6 +133,19 @@ export default function App() {
     handleDeleteImage(imageId);
   }, [images, handleDeleteImage, setConfig]);
 
+  // 有效参考图列表：config 中仍被图库图片引用的条目（过滤孤儿残留）。
+  // 编号与 AI 请求统一基于此列表——孤儿条目不占 [image N] 号、不发给模型。
+  const effectiveReferenceImages = useMemo(
+    () => config.grsaiReferenceImages.filter((b64) => images.some((img) => img.referenceBase64 === b64)),
+    [config.grsaiReferenceImages, images]
+  );
+
+  // 清空全部图片时同步清空参考图列表（图片没了，参考图必然全成孤儿）
+  const handleClearAllImagesWithReferenceCleanup = useCallback(() => {
+    setConfig(prev => prev.grsaiReferenceImages.length === 0 ? prev : { ...prev, grsaiReferenceImages: [] });
+    handleClearAllImages();
+  }, [setConfig, handleClearAllImages]);
+
   // --- MCP Bridge ---
   // 快照不含 bridgeConnected 字段（已从 BridgeStateSnapshot 类型移除）；
   // 连接状态由桥接 /health 的 appConnected 提供，Agent 经 get_status 读取。
@@ -143,7 +162,7 @@ export default function App() {
       height: img.originalHeight,
       isReference: isEffectiveReference(img, config.grsaiReferenceImages),
       referenceOrder: (() => {
-        const idx = config.grsaiReferenceImages.indexOf(img.referenceBase64 || '');
+        const idx = effectiveReferenceImages.indexOf(img.referenceBase64 || '');
         return idx >= 0 ? idx + 1 : null; // [image N] = referenceOrder + 1
       })(),
       hasResult: !!img.finalResultUrl || img.regions.some((r) => !!r.processedImageUrl),
@@ -161,9 +180,9 @@ export default function App() {
       model: config.provider === 'openai' ? config.openaiModel : config.provider === 'grsai' ? config.grsaiModel : config.geminiModel,
       prompt: config.prompt,
       processingMode: config.processingMode,
-      referenceCount: config.grsaiReferenceImages.length,
+      referenceCount: effectiveReferenceImages.length,
     },
-  }), [images, config, processingState, selectedImageId, generationSeq]);
+  }), [images, config, processingState, selectedImageId, generationSeq, effectiveReferenceImages]);
 
   const bridgeHandlers: BridgeHandlerMap = {
     upload: async ({ files }) => {
@@ -229,8 +248,9 @@ export default function App() {
       }
       const seq = generationSeq + 1;
       setGenerationSeq(seq);
-      handleProcess(scope === 'all');
-      return { ok: true, result: { generationSeq: seq } };
+      // 阻塞到处理完成再返回：正常结束 processingState=DONE，出错/停止=IDLE（避免 agent 反复 sleep 轮询）
+      const finalState = await handleProcess(scope === 'all');
+      return { ok: true, result: { generationSeq: seq, processingState: finalState } };
     },
     get_full_image: async ({ image_id }) => {
       const img = images.find((i) => i.id === image_id);
@@ -249,6 +269,17 @@ export default function App() {
       const [header, base64] = dataUrl.split(',');
       const mime = header.match(/:(.*?);/)?.[1] || 'image/png';
       return { ok: true, result: { mime, base64, kind: 'full' } };
+    },
+    get_image: async ({ image_id }) => {
+      const img = images.find((i) => i.id === image_id);
+      if (!img) return { ok: false, error: `image not found: ${image_id}` };
+      // 原图（referenceOrder 校准/目检用；与 get_full_image 的区别：这里取原始图，不是结果拼合图）
+      const url = img.originalUrl ?? img.previewUrl ?? null;
+      if (!url) return { ok: false, error: 'no image data available' };
+      const dataUrl = await urlToBase64(url);
+      const [header, base64] = dataUrl.split(',');
+      const mime = header.match(/:(.*?);/)?.[1] || 'image/png';
+      return { ok: true, result: { mime, base64, kind: 'original' } };
     },
     get_region_patch: async ({ image_id, region_id }) => {
       const img = images.find((i) => i.id === image_id);
@@ -273,10 +304,12 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [showGlobalSettings, setShowGlobalSettings] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const [restoreMode, setRestoreMode] = useState(false);
-  const [restoreBrushMode, setRestoreBrushMode] = useState(false);
-  const [restoreBrushSize, setRestoreBrushSize] = useState(8);
-  const [restoreSelectedRegionId, setRestoreSelectedRegionId] = useState<string | null>(null);
+const [restoreMode, setRestoreMode] = useState(false);
+const [restoreBrushMode, setRestoreBrushMode] = useState(false);
+const [restoreBrushSize, setRestoreBrushSize] = useState(8);
+const [restoreSelectedRegionId, setRestoreSelectedRegionId] = useState<string | null>(null);
+const [removeBrushMode, setRemoveBrushMode] = useState(false);
+const [removeBrushSize, setRemoveBrushSize] = useState(8);
   
   const [transModels, setTransModels] = useState<string[]>([]);
   const [editingRegion, setEditingRegion] = useState<{ 
@@ -642,6 +675,103 @@ export default function App() {
       }
   }, [selectedImage, config.useInvertedMasking, handleApplyResultAsOriginal, setErrorMsg]);
 
+  // 选区级"应用为原图"：只把该选区的补丁拼合烙进原图（基图用 originalUrl 保全分辨率），选区回 pending 可再编辑
+  const handleApplyRegionAsOriginalWrapper = useCallback(async (imageId: string, regionId: string) => {
+    const img = images.find((i) => i.id === imageId);
+    const region = img?.regions.find((r) => r.id === regionId);
+    if (!img || !region || region.status !== 'completed' || !region.processedImageUrl) return;
+    try {
+      const stitchedUrl = await stitchImage(img.originalUrl, [region]);
+      handleApplyRegionAsOriginal(imageId, regionId, stitchedUrl);
+    } catch (e) {
+      console.error("Failed to stitch region for apply", e);
+      setErrorMsg("Failed to apply region changes.");
+    }
+  }, [images, handleApplyRegionAsOriginal, setErrorMsg]);
+
+  // 本地 IOPaint 移除：选区内容交给本地 LaMa 擦除并填充背景（不耗 API 额度）。
+  // 结果按"手动补丁"模式写回：status=completed + processedImageUrl + anchor=选区坐标。
+  const handleRemoveRegionWithIopaintWrapper = useCallback(async (imageId: string, regionId: string) => {
+    const img = images.find((i) => i.id === imageId);
+    const region = img?.regions.find((r) => r.id === regionId);
+    if (!img || !region) return;
+    try {
+      const { patchUrl } = await removeRegionWithIopaint(img.originalUrl || img.previewUrl, region, config.iopaintUrl);
+      updateImage(imageId, (prev) => {
+        const oldRegion = prev.regions.find((r) => r.id === regionId);
+        if (oldRegion?.processedImageUrl) releaseObjectURL(oldRegion.processedImageUrl);
+        const newRegions = prev.regions.map((r) =>
+          r.id === regionId
+            ? { ...r, processedImageUrl: patchUrl, status: 'completed' as const, anchorX: r.x, anchorY: r.y, anchorWidth: r.width, anchorHeight: r.height, errorMessage: undefined }
+            : r
+        );
+        const currentHistory = [...prev.history];
+        if (currentHistory[prev.historyIndex]) {
+          currentHistory[prev.historyIndex] = { ...currentHistory[prev.historyIndex], regions: newRegions };
+        }
+        return { ...prev, regions: newRegions, history: currentHistory };
+      });
+      setErrorMsg(null);
+    } catch (e) {
+      console.error("IOPaint remove failed", e);
+      setErrorMsg(e instanceof Error ? e.message : "IOPaint remove failed.");
+    }
+  }, [images, updateImage, config.iopaintUrl, setErrorMsg]);
+
+  // 涂抹式 IOPaint 移除：自由形状 mask → IOPaint 整图填充 → 按涂抹外接矩形切补丁 → 创建新 Region 回烙。
+  const handleExecuteRemoveBrush = useCallback(async (payload: { maskDataUrl: string; bbox: { x: number; y: number; width: number; height: number } }) => {
+    const img = selectedImage;
+    if (!img) {
+      URL.revokeObjectURL(payload.maskDataUrl);
+      return;
+    }
+    const newRegionId = crypto.randomUUID();
+    try {
+      const resultUrl = await inpaintWithMask(img.originalUrl || img.previewUrl, payload.maskDataUrl, config.iopaintUrl);
+      try {
+        const resultImg = await loadImage(resultUrl);
+        const regionLike: Region = {
+          id: newRegionId,
+          x: payload.bbox.x,
+          y: payload.bbox.y,
+          width: payload.bbox.width,
+          height: payload.bbox.height,
+          type: 'rect',
+          status: 'pending',
+        };
+        const patchUrl = await cropRegion(resultImg, regionLike);
+        updateImage(img.id, (prev) => {
+          const newRegion: Region = {
+            ...regionLike,
+            status: 'completed',
+            processedImageUrl: patchUrl,
+            source: 'iopaint',
+            anchorX: payload.bbox.x,
+            anchorY: payload.bbox.y,
+            anchorWidth: payload.bbox.width,
+            anchorHeight: payload.bbox.height,
+          };
+          const newRegions = [...prev.regions, newRegion];
+          const currentHistory = [...prev.history];
+          if (currentHistory[prev.historyIndex]) {
+            currentHistory[prev.historyIndex] = { ...currentHistory[prev.historyIndex], regions: newRegions };
+          }
+          return { ...prev, regions: newRegions, history: currentHistory };
+        });
+        setSelectedRegionId(newRegionId);
+        setRemoveBrushMode(false);
+        setErrorMsg(null);
+      } finally {
+        URL.revokeObjectURL(resultUrl);
+      }
+    } catch (e) {
+      console.error("IOPaint brush remove failed", e);
+      setErrorMsg(e instanceof Error ? e.message : "IOPaint brush remove failed.");
+    } finally {
+      URL.revokeObjectURL(payload.maskDataUrl);
+    }
+  }, [selectedImage, config.iopaintUrl, updateImage, setErrorMsg]);
+
   // 选区编辑：水平翻转选区内容。有补丁→翻转补丁；无补丁→裁原图翻转成手动补丁。
   const handleFlipRegion = useCallback(async (imageId: string, regionId: string) => {
     const img = images.find((i) => i.id === imageId);
@@ -792,7 +922,7 @@ export default function App() {
         onUpdateRegionPrompt={handleUpdateRegionPrompt}
         onUpdateImagePrompt={handleUpdateImagePrompt}
         onDeleteImage={handleDeleteImageWithReferenceCleanup}
-        onClearAllImages={handleClearAllImages} 
+        onClearAllImages={handleClearAllImagesWithReferenceCleanup} 
         onToggleSkip={handleToggleSkip}
         onToggleReference={handleToggleReference}
         onAutoDetect={handleAutoDetect}
@@ -816,22 +946,32 @@ export default function App() {
                    onClick={() => setViewMode('original')}
                    className={`px-3 py-1.5 rounded-full text-xs font-bold backdrop-blur-md border shadow-sm transition-all ${viewMode === 'original' ? 'bg-skin-primary text-skin-primary-fg border-skin-primary' : 'bg-skin-surface/80 text-skin-text border-skin-border hover:bg-skin-surface'}`}
                  >
-                   {t(config.language, 'readyToCreate')}
+                   {t(config.language, 'viewEdit')}
                  </button>
                   {(selectedImage.regions.some(r => r.status === 'completed') || selectedImage.isSkipped || selectedImage.finalResultUrl) && (
                      <button 
                          onClick={() => { setViewMode('result'); setRestoreMode(false); }}
                          className={`px-3 py-1.5 rounded-full text-xs font-bold backdrop-blur-md border shadow-sm transition-all ${viewMode === 'result' && !restoreMode ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-skin-surface/80 text-skin-text border-skin-border hover:bg-skin-surface'}`}
                      >
-                         {t(config.language, 'status_completed')}
+                          {t(config.language, 'viewPreview')}
                      </button>
                   )}
-                  {viewMode === 'result' && selectedImage.regions.some(r => r.status === 'completed') && (
+                   {viewMode === 'result' && selectedImage.regions.some(r => r.status === 'completed') && (
                      <button 
                          onClick={() => { setRestoreMode(!restoreMode); setRestoreBrushMode(false); setRestoreSelectedRegionId(null); }}
                          className={`px-3 py-1.5 rounded-full text-xs font-bold backdrop-blur-md border shadow-sm transition-all ${restoreMode ? 'bg-amber-500 text-white border-amber-500' : 'bg-skin-surface/80 text-skin-text border-skin-border hover:bg-skin-surface'}`}
                      >
                          {restoreMode ? '退出还原' : '🔧 框选还原'}
+                     </button>
+                  )}
+                  {/* Brush IOPaint remove mode */}
+                  {viewMode === 'original' && (
+                     <button
+                         onClick={() => { setRemoveBrushMode(!removeBrushMode); setRestoreMode(false); setRestoreBrushMode(false); }}
+                         className={`px-3 py-1.5 rounded-full text-xs font-bold backdrop-blur-md border shadow-sm transition-all ${removeBrushMode ? 'bg-rose-500 text-white border-rose-500' : 'bg-skin-surface/80 text-skin-text border-skin-border hover:bg-skin-surface'}`}
+                         title={t(config.language, 'removeBrushModeDesc')}
+                     >
+                         {removeBrushMode ? '退出涂抹' : t(config.language, 'removeBrushMode')}
                      </button>
                   )}
                   {/* Restore toolbar - only when restore mode is active */}
@@ -923,6 +1063,14 @@ export default function App() {
                     showEditorButton={showEditor}
                     onAdjustRegionSize={editorOnAdjustRegionSize}
                     onFlipRegion={(regionId) => handleFlipRegion(selectedImage.id, regionId)}
+                    onApplyRegionAsOriginal={(imageId, regionId) => handleApplyRegionAsOriginalWrapper(imageId, regionId)}
+                    onRemoveRegionWithIopaint={(imageId, regionId) => handleRemoveRegionWithIopaintWrapper(imageId, regionId)}
+                    removeBrushMode={removeBrushMode}
+                    removeBrushSize={removeBrushSize}
+                    theme={config.theme}
+                    onExecuteRemoveBrush={handleExecuteRemoveBrush}
+                    onClearRemoveBrush={() => {}}
+                    onExitRemoveBrush={() => setRemoveBrushMode(false)}
                     onInteractionStart={handleInteractionStart}
                     viewMode={viewMode}
                     restoreMode={restoreMode}
@@ -932,6 +1080,7 @@ export default function App() {
                     restoreBrushSize={restoreBrushSize}
                     restoreSelectedRegionId={restoreSelectedRegionId}
                     onSelectRestoreRegion={setRestoreSelectedRegionId}
+                    enablePanelSnap={config.enablePanelSnap}
                 />
               )}
             </>

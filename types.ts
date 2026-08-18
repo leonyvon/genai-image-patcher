@@ -29,7 +29,7 @@ export interface Region {
   anchorY?: number;
   anchorWidth?: number;
   anchorHeight?: number;
-  source?: 'manual' | 'auto'; // To distinguish manually drawn vs AI detected regions
+  source?: 'manual' | 'auto' | 'iopaint'; // To distinguish manually drawn vs AI detected vs local IOPaint removal regions
   customPrompt?: string; // Image-specific prompt overrides global prompt
   contextOnly?: boolean; // If true, region is visible context only — not translated or painted
   ocrText?: string; // Detected text from OCR
@@ -76,7 +76,7 @@ export interface UploadedImage {
 
 export type AiProvider = 'openai' | 'gemini' | 'grsai';
 
-export type ThemeType = 'light' | 'dark' | 'ocean' | 'rose' | 'forest';
+export type ThemeType = 'light' | 'dark';
 
 export type Language = 'zh' | 'en';
 
@@ -135,6 +135,9 @@ export interface AppConfig {
   // Backend Detection Settings (Python)
   detectionApiUrl: string; // e.g. http://localhost:8000/detect
   ocrApiUrl: string; // e.g. http://localhost:8000/ocr
+
+  // Local IOPaint (LaMa) erase service
+  iopaintUrl: string; // e.g. http://127.0.0.1:8080
   
   // Detection Tuning
   detectionInflationPercent: number; // e.g. 10 for 10% expansion
@@ -148,6 +151,7 @@ export interface AppConfig {
   enableOCR: boolean;              // Sub switch: Text recognition
   enableManualEditor: boolean;     // Sub switch: Brush/Text editor
   enableVerticalTextDefault: boolean; // Sub switch: Default text orientation
+  enablePanelSnap: boolean;          // Snap drawn region edges to the nearest panel border
 
   // Logic Switch
   useFullImageMasking: boolean; // Send full image with non-selected areas masked white

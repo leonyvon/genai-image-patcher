@@ -86,6 +86,7 @@ const DEFAULT_CONFIG: AppConfig = {
   // Default to localhost for Python backend development
   detectionApiUrl: 'http://localhost:5000/detect',
   ocrApiUrl: 'http://localhost:5000/ocr',
+  iopaintUrl: 'http://127.0.0.1:8080',
   
   // Detection Tuning Defaults
   detectionInflationPercent: 10,
@@ -99,6 +100,7 @@ const DEFAULT_CONFIG: AppConfig = {
   enableOCR: true,
   enableManualEditor: true,
   enableVerticalTextDefault: false,
+  enablePanelSnap: true,
   
   // New Logic Toggle
   useFullImageMasking: false,
@@ -176,6 +178,11 @@ export function useConfig() {
             migratedConfig.fullImageOpaquePercent = 90;
         }
 
+        // Ensure enablePanelSnap exists
+        if (typeof migratedConfig.enablePanelSnap === 'undefined') {
+            migratedConfig.enablePanelSnap = true;
+        }
+
         // Ensure Translation settings exist
         if (typeof migratedConfig.enableTranslationMode === 'undefined') {
             migratedConfig.enableTranslationMode = false;
@@ -230,6 +237,11 @@ export function useConfig() {
         // Ensure grsaiReferenceImages exists
         if (typeof migratedConfig.grsaiReferenceImages === 'undefined' || !Array.isArray(migratedConfig.grsaiReferenceImages)) {
             migratedConfig.grsaiReferenceImages = [];
+        }
+
+        // Theme: only light/dark remain; stale saved themes (ocean/rose/forest) fall back to light
+        if (migratedConfig.theme !== 'light' && migratedConfig.theme !== 'dark') {
+            migratedConfig.theme = 'light';
         }
 
         return migratedConfig;

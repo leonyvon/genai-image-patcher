@@ -137,6 +137,14 @@ npm run dev
 *   **Base URL**: 默认为 `https://api.openai.com/v1`。如果你使用的是中转服务或本地模型，请修改此地址。
 *   **API Key**: 你的 OpenAI 格式密钥 (`sk-...`)。
 
+## 🤖 MCP 桥接（人机协作改图）
+
+Agent（如 opencode）可通过 `genai-bridge-mcp` 驱动本应用，形成"人机协作改图"闭环：**人**在浏览器框选选区/挂参考图，**Agent** 读状态、传图、标参考图、写提示词、触发生成、取结果并迭代。
+
+- 三层架构：`mcp/server.py`（FastMCP 工具层）→ `bridge/server.mjs`（Node 桥接，127.0.0.1:3100）→ `hooks/useBridge.ts`（浏览器侧命令映射 + 状态快照推送，防抖 300ms）。
+- 工具契约：所有工具返回**字符串**（成功为 JSON，失败以 `Error: ` 前缀）；`generate` **阻塞至完成才返回**；blob URL 出不了浏览器，取图必须走工具（base64 经 WS 中转）。
+- **🔒 参考图校准门禁（系统强制）**：每次 `generate` 前必须先调用 `review_references(task_description, keep, remove, add)` 校准参考图。未校准、校准后参考图有变动、或上一次 generate 已消耗校准（一次性校准），`generate` 都会返回 `REFERENCE_CALIBRATION_REQUIRED` 被拦截——这是**硬门禁**，不是建议，目的是防止"上一轮任务的参考图被无意识沿用进下一轮不同任务"。校准前用 `get_image` 把参考图导出目检。详见 `AGENTS.md` 与全局 skill `genai-image-patcher`。
+
 ## 💻 技术栈
 
 *   **Frontend Framework**: React 19 (Hooks, Functional Components)

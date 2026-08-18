@@ -117,6 +117,21 @@ const GlobalSettings: React.FC<GlobalSettingsProps> = ({
                   )}
                   <div className="flex items-center justify-between border-t border-skin-border pt-4 mt-4">
                       <div>
+                          <div className="text-sm font-bold text-skin-text">{t(config.language, 'enablePanelSnap')}</div>
+                          <div className="text-xs text-skin-muted max-w-[200px]">{t(config.language, 'enablePanelSnapDesc')}</div>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                            type="checkbox"
+                            className="sr-only peer"
+                            checked={config.enablePanelSnap}
+                            onChange={(e) => updateConfig('enablePanelSnap', e.target.checked)}
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-skin-primary"></div>
+                      </label>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-skin-border pt-4 mt-4">
+                      <div>
                           <div className="text-sm font-bold text-skin-text">{t(config.language, 'useFullImageMasking')}</div>
                           <div className="text-xs text-skin-muted max-w-[200px]">{t(config.language, 'useFullImageMaskingDesc')}</div>
                       </div>
@@ -171,6 +186,17 @@ const GlobalSettings: React.FC<GlobalSettingsProps> = ({
                           </div>
                       </div>
                   )}
+                  <div className="border-t border-skin-border pt-4 mt-4 space-y-2">
+                      <label className="text-[10px] uppercase font-bold text-skin-muted block">{t(config.language, 'iopaintUrl')}</label>
+                      <input
+                          type="text"
+                          value={config.iopaintUrl}
+                          onChange={(e) => updateConfig('iopaintUrl', e.target.value)}
+                          placeholder="http://127.0.0.1:8080"
+                          className="w-full p-2 text-xs border border-skin-border rounded bg-skin-surface focus:ring-1 focus:ring-skin-primary/50"
+                      />
+                      <p className="text-[10px] text-skin-muted leading-tight">{t(config.language, 'iopaintRemoveDesc')}</p>
+                  </div>
                   <div className="flex items-center justify-between border-t border-skin-border pt-4 mt-4">
                       <div>
                           <div className="text-sm font-bold text-skin-text">{t(config.language, 'aiPayloadCompression')}</div>
