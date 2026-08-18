@@ -1,10 +1,10 @@
 
 import React, { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from 'react';
-import { UploadedImage, Region, Language, RestoreBox, ThemeType } from '../types';
+import { UploadedImage, Region, Language, RestoreBox, ThemeType, SketchStroke } from '../types';
 import { t } from '../services/translations';
 import { useCanvasInteraction } from '../hooks/useCanvasInteraction';
 import { usePanelSnap } from '../hooks/usePanelSnap';
-import { renderRegionWithRestore, loadImage, releaseObjectURL } from '../services/imageUtils';
+import { renderRegionWithRestore, loadImage, releaseObjectURL, compositeSketchStrokes } from '../services/imageUtils';
 
 // Helper: convert a canvas to a Blob-backed Object URL (memory-efficient,
 // avoids the giant base64 string that toDataURL produces).
@@ -48,6 +48,13 @@ interface EditorCanvasProps {
   restoreBrushSize?: number;
   restoreSelectedRegionId?: string | null;
   onSelectRestoreRegion?: (regionId: string | null) => void;
+  /** Sketch brush: AI-visible guidance strokes on the whole image. */
+  brushMode?: boolean;
+  brushColor?: string;
+  brushSize?: number;
+  brushEraser?: boolean;
+  onUpdateSketchStrokes?: (imageId: string, strokes: SketchStroke[]) => void;
+  onClearSketchStrokes?: () => void;
   /** When enabled, a drawn region's edges snap to the nearest panel border on mouse-up. */
   enablePanelSnap?: boolean;
 }
@@ -99,6 +106,12 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
     restoreBrushSize = 8,
     restoreSelectedRegionId = null,
     onSelectRestoreRegion,
+    brushMode = false,
+    brushColor = '#ff3b30',
+    brushSize = 2,
+    brushEraser = false,
+    onUpdateSketchStrokes,
+    onClearSketchStrokes,
     enablePanelSnap = true,
 }) => {
   // --- Refs ---
@@ -404,6 +417,11 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
   const removeMaskCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const removeBrushOverlayRef = useRef<HTMLCanvasElement | null>(null);
   const [brushRemoveSize, setBrushRemoveSize] = useState(removeBrushSize);
+
+  // --- Sketch brush state (AI-visible guidance strokes) ---
+  const [isSketchPainting, setIsSketchPainting] = useState(false);
+  const sketchOverlayRef = useRef<HTMLCanvasElement | null>(null);
+  const liveStrokeRef = useRef<SketchStroke | null>(null);
 
   // Signature that captures only the fields we care about for the restore composite.
   // Identity of `image.regions` changes on every drag/prompt edit, but the signature
@@ -891,6 +909,84 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
   const isOriginalMode = viewMode === 'original';
   const isRestoreActive = restoreMode && viewMode === 'result';
 
+  // --- Sketch brush: render strokes onto the overlay canvas (full-res px) ---
+  const renderSketchOverlay = useCallback(() => {
+    const overlay = sketchOverlayRef.current;
+    if (!overlay) return;
+    const octx = overlay.getContext('2d');
+    if (!octx) return;
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    compositeSketchStrokes(octx, image.sketchStrokes || [], overlay.width, overlay.height);
+  }, [image.sketchStrokes]);
+
+  // Size the overlay to the image and (re)render whenever strokes / mode change.
+  useEffect(() => {
+    const overlay = sketchOverlayRef.current;
+    if (!overlay) return;
+    overlay.width = image.originalWidth || 800;
+    overlay.height = image.originalHeight || 600;
+    renderSketchOverlay();
+  }, [isOriginalMode, brushMode, image.originalWidth, image.originalHeight, image.sketchStrokes, renderSketchOverlay]);
+
+  // Window-level mouse handlers for sketch brush painting / erasing
+  useEffect(() => {
+    if (!brushMode || !isOriginalMode) return;
+
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      if (!isSketchPainting || !sketchOverlayRef.current) return;
+      const overlay = sketchOverlayRef.current;
+      const rect = overlay.getBoundingClientRect();
+      const px = ((e.clientX - rect.left) / rect.width) * 100;
+      const py = ((e.clientY - rect.top) / rect.height) * 100;
+
+      if (brushEraser) {
+        // Vector eraser: remove whole strokes whose any point is within radius
+        const radiusPct = brushSize;
+        const current = image.sketchStrokes || [];
+        const remaining = current.filter(s =>
+          !s.points.some(p => Math.hypot(p.x - px, p.y - py) <= radiusPct)
+        );
+        if (remaining.length !== current.length && onUpdateSketchStrokes) {
+          onUpdateSketchStrokes(image.id, remaining);
+        }
+        return;
+      }
+
+      const live = liveStrokeRef.current;
+      if (!live) return;
+      const octx = overlay.getContext('2d');
+      if (!octx) return;
+      const prev = live.points[live.points.length - 1];
+      const sizePx = (live.size / 100) * Math.max(overlay.width, overlay.height);
+      octx.strokeStyle = live.color;
+      octx.lineWidth = sizePx;
+      octx.lineCap = 'round';
+      octx.lineJoin = 'round';
+      octx.beginPath();
+      octx.moveTo((prev.x / 100) * overlay.width, (prev.y / 100) * overlay.height);
+      octx.lineTo((px / 100) * overlay.width, (py / 100) * overlay.height);
+      octx.stroke();
+      live.points.push({ x: px, y: py });
+    };
+
+    const handleWindowMouseUp = () => {
+      if (!isSketchPainting) return;
+      setIsSketchPainting(false);
+      const live = liveStrokeRef.current;
+      liveStrokeRef.current = null;
+      if (live && live.points.length > 0 && onUpdateSketchStrokes) {
+        onUpdateSketchStrokes(image.id, [...(image.sketchStrokes || []), live]);
+      }
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+    };
+  }, [brushMode, isOriginalMode, isSketchPainting, brushEraser, brushSize, image.id, image.sketchStrokes, onUpdateSketchStrokes]);
+
   // A completed region's patch overlay shows when:
   // - result view: always (all completed patches), unchanged
   // - original (work) view: only for the selected region, when not previewing
@@ -940,6 +1036,32 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
             if (e.button !== 0) return;
             if (e.altKey || spaceHeldRef.current) return;
             setIsRemovePainting(true);
+          } : brushMode && isOriginalMode ? (e) => {
+            // Sketch brush: start a new guidance stroke (or erase)
+            if (e.button !== 0) return;
+            if (e.altKey || spaceHeldRef.current) return;
+            const overlay = sketchOverlayRef.current;
+            if (!overlay) return;
+            const rect = overlay.getBoundingClientRect();
+            const px = ((e.clientX - rect.left) / rect.width) * 100;
+            const py = ((e.clientY - rect.top) / rect.height) * 100;
+            setIsSketchPainting(true);
+            liveStrokeRef.current = {
+              id: crypto.randomUUID(),
+              color: brushColor,
+              size: brushSize,
+              points: [{ x: px, y: py }],
+            };
+            if (!brushEraser) {
+              const octx = overlay.getContext('2d');
+              if (octx) {
+                const sizePx = (brushSize / 100) * Math.max(overlay.width, overlay.height);
+                octx.fillStyle = brushColor;
+                octx.beginPath();
+                octx.arc((px / 100) * overlay.width, (py / 100) * overlay.height, sizePx / 2, 0, Math.PI * 2);
+                octx.fill();
+              }
+            }
           } : (e) => {
             // Block left-click background interaction when panning with space or alt
             if (e.button === 0 && (e.altKey || spaceHeldRef.current)) return;
@@ -950,7 +1072,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
             height: imgH,
             transformOrigin: '0 0',
             transform: `translate(${(vpW - imgW * zoom) / 2 + panX}px, ${(vpH - imgH * zoom) / 2 + panY}px) scale(${zoom})`,
-            cursor: isRestoreActive ? 'crosshair' : (removeBrushMode ? 'crosshair' : (isOriginalMode && interaction.type === 'drawing' ? 'crosshair' : 'default')),
+            cursor: isRestoreActive ? 'crosshair' : (removeBrushMode ? 'crosshair' : (brushMode && isOriginalMode ? 'crosshair' : (isOriginalMode && interaction.type === 'drawing' ? 'crosshair' : 'default'))),
             visibility: isZoomReady ? 'visible' : 'hidden',
           }}
         >
@@ -962,6 +1084,18 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
               style={{ width: '100%', height: '100%', zIndex: 6 }}
             />
           )}
+
+          {/* Sketch brush overlay: AI-visible guidance strokes (hidden in result view) */}
+          <canvas
+            ref={sketchOverlayRef}
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              width: '100%',
+              height: '100%',
+              zIndex: 4,
+              display: isOriginalMode && (brushMode || (image.sketchStrokes && image.sketchStrokes.length > 0)) ? 'block' : 'none',
+            }}
+          />
 
           {/* Base Image */}
           <img
