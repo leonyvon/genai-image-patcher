@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
-import { Region, ProcessingStep, AppConfig, RestoreBox } from './types';
+import { Region, ProcessingStep, AppConfig, RestoreBox, SketchStroke } from './types';
 import Sidebar from './components/Sidebar';
 import EditorCanvas from './components/EditorCanvas';
 import type { TextObject } from './components/PatchEditor';
@@ -310,6 +310,11 @@ const [restoreBrushSize, setRestoreBrushSize] = useState(8);
 const [restoreSelectedRegionId, setRestoreSelectedRegionId] = useState<string | null>(null);
 const [removeBrushMode, setRemoveBrushMode] = useState(false);
 const [removeBrushSize, setRemoveBrushSize] = useState(8);
+const [brushMode, setBrushMode] = useState(false);
+const [brushColor, setBrushColor] = useState('#ff3b30');
+const [brushSize, setBrushSize] = useState(2);
+const [brushEraser, setBrushEraser] = useState(false);
+const [confirmClearStrokes, setConfirmClearStrokes] = useState(false);
   
   const [transModels, setTransModels] = useState<string[]>([]);
   const [editingRegion, setEditingRegion] = useState<{ 
@@ -631,6 +636,16 @@ const [removeBrushSize, setRemoveBrushSize] = useState(8);
           regions: img.regions.map(r => r.id === regionId ? { ...r, restoreMaskUrl: maskBase64 || undefined } : r)
       }));
   }, [updateAllImages]);
+
+  const handleUpdateSketchStrokes = useCallback((imageId: string, strokes: SketchStroke[]) => {
+      updateImage(imageId, img => ({ ...img, sketchStrokes: strokes.length > 0 ? strokes : undefined }));
+  }, [updateImage]);
+
+  const handleClearSketchStrokes = useCallback(() => {
+      if (!selectedImage) return;
+      updateImage(selectedImage.id, img => ({ ...img, sketchStrokes: undefined }));
+      setConfirmClearStrokes(false);
+  }, [selectedImage, updateImage]);
 
   // ON-DEMAND STITCHING for Download
   const handleDownload = useCallback(async () => {
@@ -958,7 +973,7 @@ const [removeBrushSize, setRemoveBrushSize] = useState(8);
                   )}
                    {viewMode === 'result' && selectedImage.regions.some(r => r.status === 'completed') && (
                      <button 
-                         onClick={() => { setRestoreMode(!restoreMode); setRestoreBrushMode(false); setRestoreSelectedRegionId(null); }}
+                         onClick={() => { setRestoreMode(!restoreMode); setRestoreBrushMode(false); setRestoreSelectedRegionId(null); setBrushMode(false); }}
                          className={`px-3 py-1.5 rounded-full text-xs font-bold backdrop-blur-md border shadow-sm transition-all ${restoreMode ? 'bg-amber-500 text-white border-amber-500' : 'bg-skin-surface/80 text-skin-text border-skin-border hover:bg-skin-surface'}`}
                      >
                          {restoreMode ? '退出还原' : '🔧 框选还原'}
@@ -967,11 +982,21 @@ const [removeBrushSize, setRemoveBrushSize] = useState(8);
                   {/* Brush IOPaint remove mode */}
                   {viewMode === 'original' && (
                      <button
-                         onClick={() => { setRemoveBrushMode(!removeBrushMode); setRestoreMode(false); setRestoreBrushMode(false); }}
+                         onClick={() => { setRemoveBrushMode(!removeBrushMode); setRestoreMode(false); setRestoreBrushMode(false); setBrushMode(false); }}
                          className={`px-3 py-1.5 rounded-full text-xs font-bold backdrop-blur-md border shadow-sm transition-all ${removeBrushMode ? 'bg-rose-500 text-white border-rose-500' : 'bg-skin-surface/80 text-skin-text border-skin-border hover:bg-skin-surface'}`}
                          title={t(config.language, 'removeBrushModeDesc')}
                      >
                          {removeBrushMode ? '退出涂抹' : t(config.language, 'removeBrushMode')}
+                     </button>
+                  )}
+                  {/* Sketch brush mode (AI-visible guidance strokes) */}
+                  {viewMode === 'original' && (
+                     <button
+                         onClick={() => { setBrushMode(!brushMode); setRestoreMode(false); setRestoreBrushMode(false); setRemoveBrushMode(false); setConfirmClearStrokes(false); }}
+                         className={`px-3 py-1.5 rounded-full text-xs font-bold backdrop-blur-md border shadow-sm transition-all ${brushMode ? 'bg-sky-500 text-white border-sky-500' : 'bg-skin-surface/80 text-skin-text border-skin-border hover:bg-skin-surface'}`}
+                         title={t(config.language, 'brushModeDesc')}
+                     >
+                         {brushMode ? '退出画笔' : t(config.language, 'brushMode')}
                      </button>
                   )}
                   {/* Restore toolbar - only when restore mode is active */}
@@ -1008,6 +1033,36 @@ const [removeBrushSize, setRemoveBrushSize] = useState(8);
                         className="px-2 py-1 text-[10px] font-bold bg-rose-500/80 text-white rounded border border-rose-500 hover:bg-rose-500 disabled:opacity-30"
                         disabled={!restoreSelectedRegionId}
                       >清除</button>
+                    </div>
+                  )}
+                  {/* Sketch brush tool panel */}
+                  {brushMode && (
+                    <div className="absolute top-16 left-4 z-10 flex flex-col gap-2 p-3 rounded-xl bg-skin-surface/90 backdrop-blur-md border border-skin-border shadow-xl">
+                      <div className="flex gap-1.5">
+                        {['#ff3b30', '#3b82f6', '#22c55e', '#eab308', '#ffffff', '#111111'].map(c => (
+                          <button key={c} onClick={() => setBrushColor(c)}
+                            className={`w-5 h-5 rounded-full border-2 transition-transform ${brushColor === c ? 'border-sky-500 scale-110' : 'border-skin-border hover:scale-105'}`}
+                            style={{ backgroundColor: c }} />
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-skin-muted">{t(config.language, 'brushSize')}</span>
+                        <input type="range" min="1" max="10" step="0.5" value={brushSize}
+                          onChange={(e) => setBrushSize(Number(e.target.value))}
+                          className="w-24 h-1 accent-sky-500" />
+                        <span className="text-[10px] text-skin-muted w-4">{brushSize}</span>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <button onClick={() => setBrushEraser(!brushEraser)}
+                          className={`px-2 py-1 text-[10px] font-bold rounded border ${brushEraser ? 'bg-rose-500 text-white border-rose-500' : 'bg-skin-surface text-skin-text border-skin-border hover:bg-skin-surface'}`}>
+                          {t(config.language, 'brushEraser')}
+                        </button>
+                        <button
+                          onClick={() => confirmClearStrokes ? handleClearSketchStrokes() : setConfirmClearStrokes(true)}
+                          className={`px-2 py-1 text-[10px] font-bold rounded border ${confirmClearStrokes ? 'bg-rose-600 text-white border-rose-600' : 'bg-rose-500/80 text-white border-rose-500 hover:bg-rose-500'}`}>
+                          {confirmClearStrokes ? t(config.language, 'brushClearConfirm') : t(config.language, 'brushClear')}
+                        </button>
+                      </div>
                     </div>
                   )}
                  {selectedImage.isSkipped && (
@@ -1076,6 +1131,12 @@ const [removeBrushSize, setRemoveBrushSize] = useState(8);
                     restoreMode={restoreMode}
                     onUpdateRestoreBoxes={restoreMode ? handleUpdateRestoreBoxes : undefined}
                     onUpdateRestoreMask={restoreMode ? handleUpdateRestoreMask : undefined}
+                    brushMode={brushMode}
+                    brushColor={brushColor}
+                    brushSize={brushSize}
+                    brushEraser={brushEraser}
+                    onUpdateSketchStrokes={brushMode ? handleUpdateSketchStrokes : undefined}
+                    onClearSketchStrokes={brushMode ? handleClearSketchStrokes : undefined}
                     restoreBrushMode={restoreBrushMode}
                     restoreBrushSize={restoreBrushSize}
                     restoreSelectedRegionId={restoreSelectedRegionId}
