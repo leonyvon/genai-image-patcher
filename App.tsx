@@ -1051,7 +1051,7 @@ const [confirmClearStrokes, setConfirmClearStrokes] = useState(false);
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] font-bold text-skin-muted">{t(config.language, 'brushSize')}</span>
-                        <input type="range" min="1" max="10" step="0.5" value={brushSize}
+                        <input type="range" min="0.5" max="10" step="0.5" value={brushSize}
                           onChange={(e) => setBrushSize(Number(e.target.value))}
                           className="w-24 h-1 accent-sky-500" />
                         <span className="text-[10px] text-skin-muted w-4">{brushSize}</span>
