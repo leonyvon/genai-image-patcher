@@ -122,9 +122,9 @@ export function useImageProcessor(
                 // Handle Inverted Masking — now returns Object URL
                 let inputImageUrl: string;
                 if (config.useInvertedMasking) {
-                    inputImageUrl = await createInvertedMultiMaskedFullImage(maskImg, allActiveRegions);
+                    inputImageUrl = await createInvertedMultiMaskedFullImage(maskImg, allActiveRegions, imageSnapshot.sketchStrokes);
                 } else {
-                    inputImageUrl = await createMultiMaskedFullImage(maskImg, allActiveRegions);
+                    inputImageUrl = await createMultiMaskedFullImage(maskImg, allActiveRegions, imageSnapshot.sketchStrokes);
                 }
 
                 // Square Fill Logic — returns Object URL.
@@ -311,7 +311,7 @@ export function useImageProcessor(
         if (config.enableTranslationMode && config.sendMaskedContextForTranslation) {
             try {
                 // Same mask-canvas size concern as the useFullImageMasking branch.
-                const fullMaskedUrl = await createMultiMaskedFullImage(maskImg, allActiveRegions);
+                const fullMaskedUrl = await createMultiMaskedFullImage(maskImg, allActiveRegions, imageSnapshot.sketchStrokes);
                 if (config.enableAiPayloadCompression) {
                     maskedContextUrl = await compressImageToTargetSize(fullMaskedUrl, { targetSizeKB: config.aiPayloadTranslationTargetKB });
                     releaseObjectURL(fullMaskedUrl);
@@ -337,7 +337,7 @@ export function useImageProcessor(
 
             try {
                 if (signal.aborted) return;
-                croppedUrl = await cropRegion(imgElement, region);
+                croppedUrl = await cropRegion(imgElement, region, imageSnapshot.sketchStrokes);
 
                 let payloadUrl = croppedUrl;
                 let paddingInfo: PaddingInfo | null = null;
