@@ -30,6 +30,15 @@
 - **按钮文案 key 别混用**：`viewEdit`/`viewPreview`（顶部视图切换按钮）；`readyToCreate` 仅空状态大标题用；`status_completed` 是选区状态徽章 key（`t(status_${region.status})`）——改按钮文案要新建 key，别改共享 key 的译文。
 - 侧栏提示词区一次列出**所有选区**的 prompt 输入框（`promptRegionsLabel` = "选区 N"），不再"点一个显示一个"。
 
+## 画笔草图指引（Sketch Brush，2026-08-18 新增）
+
+- **`image.sketchStrokes`** = 矢量线条数组（`SketchStroke { id, color, size, points[] }`）：坐标相对整图百分比（与 Region 同体系），`size` = 图片最大边长百分比。**独立图层，永不写入最终输出**（拼合/下载/ZIP 只用 originalUrl + 补丁）。
+- **AI 合成**：`compositeSketchStrokes(ctx, strokes, canvasW, canvasH, sourceRect?)`（imageUtils.ts）；接线在 `cropRegion` / `createMultiMaskedFullImage` / `createInvertedMultiMaskedFullImage` 的第三可选参，useImageProcessor 4 处调用点传 `imageSnapshot.sketchStrokes`。
+- **线条粗细坑（勿改回）**：有 `sourceRect`（`cropRegion` 是 1:1 原生裁剪，canvas=选区像素）时线宽必须按**整图最大边长**反推（`canvasW/(sourceRect.width/100)`）——否则 AI 看到的线条比用户画的细一个"选区/整图"比例；无 sourceRect（全图遮罩）按 canvas 比例即可。
+- **生命周期**：仅橡皮擦（整条删）/清空按钮可删；result 视图（预览）临时隐藏全部线条（overlay `display:none`，zIndex 7 在补丁层上）；选区 ✅ 提交为原图后清空**任意点落在该选区矩形内**的线条（`handleApplyRegionAsOriginal`，any-point 语义）；整图"应用为原图"保留线条；**不进历史快照**（撤销不恢复线条）。
+- **UI**：🖌 画笔按钮（与框选还原/涂抹移除互斥）+ 面板（6 色/粗细 1-10/橡皮擦/两次点击确认清空，面板仅 original 视图显示）；**光标环是 DOM 元素**（`translate(-50%,-50%) scale(1/zoom)` 缩放补偿）——勿改成全分辨率 canvas 重绘（6000×8000 会卡）。
+- **模式守卫**：画笔仅 original 视图可画；brushMode mousedown 分支检查 `disabled`；**橡皮擦手势不提交垃圾笔画**（mouseup 提交带 `!brushEraser` 守卫，liveStrokeRef 仅非擦除时创建）。
+
 ## grsai（gpt-image-2）特性
 
 - 接口：`POST https://grsai.dakka.com.cn/v1/api/generate`，Bearer 认证；`images[]` 支持多参考图；`aspectRatio` 自由格式（直接传选区 `"WxH"` 像素即可）。
