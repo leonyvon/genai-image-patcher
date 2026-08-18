@@ -57,6 +57,7 @@
 
 ## 环境注意事项（本机）
 
+- **IOPaint**：装在本机 conda `llm` 环境（`d:\anaconda3\envs\llm`，不在 PATH）；`anime-lama` 模型已缓存（`~/.cache/torch/hub/checkpoints/anime-manga-big-lama.pt`）。应用通过 `config.iopaintUrl`（默认 `http://127.0.0.1:8080`，`services/iopaintService.ts`）调用"本地移除"，**无后端、浏览器无法拉起外部进程**，只能独立启动。已加 `predev` 钩子（`scripts/start-iopaint.ps1`）：`npm run dev` 时幂等拉起——8080 已监听则跳过，否则后台启动并等端口（最多 60s，首启可能下载模型），永不阻塞 vite（exit 0）。日志在 `%LOCALAPPDATA%\iopaint\`。
 - **HTTP_PROXY（127.0.0.1:7897）会破坏 PowerShell 的 `Invoke-RestMethod` 访问 127.0.0.1**（返回 502）——调试桥接用 Node fetch/curl 或先清代理变量；Python httpx 调用本机桥接需 `trust_env=False`。
 - Python MCP 依赖：**`mcp>=1.0,<2`**（2.x 移除了 `FastMCP`，API 不兼容）；桥接 Node 依赖仅 `ws`。
 - 本机环境有 OPENAI_API_KEY 占位（6 位），真实 key 在 opencode.json 的 grsai-mcp 配置里。
