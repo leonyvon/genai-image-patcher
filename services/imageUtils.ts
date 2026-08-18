@@ -429,34 +429,71 @@ export const compositeSketchStrokes = (
   sourceRect?: { x: number; y: number; width: number; height: number }
 ): void => {
   if (!strokes || strokes.length === 0) return;
+
+  // Render strokes onto a dedicated transparent layer so the destination-out
+  // erase pass below can never touch the image/mask already on `ctx`.
+  const layer = document.createElement('canvas');
+  layer.width = canvasW;
+  layer.height = canvasH;
+  const lctx = layer.getContext('2d');
+  if (!lctx) return;
+
+  lctx.lineCap = 'round';
+  lctx.lineJoin = 'round';
+
+  const map = (x: number, y: number): [number, number] => {
+    const lx = sourceRect ? ((x - sourceRect.x) / sourceRect.width) * 100 : x;
+    const ly = sourceRect ? ((y - sourceRect.y) / sourceRect.height) * 100 : y;
+    return [(lx / 100) * canvasW, (ly / 100) * canvasH];
+  };
+
+  for (const stroke of strokes) {
+    const imgMax = sourceRect
+      ? Math.max(canvasW / (sourceRect.width / 100), canvasH / (sourceRect.height / 100))
+      : Math.max(canvasW, canvasH);
+    const lineWidth = (stroke.size / 100) * imgMax;
+    const opacity = stroke.opacity ?? 1;
+
+    // Draw the stroke shape twice (path, or a dot for a single point):
+    // 1) destination-out erases any previous strokes underneath → the topmost
+    //    stroke wins in overlap areas, no alpha accumulation / darkening.
+    // 2) source-over draws the stroke itself at its opacity.
+    const trace = (op: GlobalCompositeOperation, alpha: number, color: string) => {
+      lctx.globalCompositeOperation = op;
+      lctx.globalAlpha = alpha;
+      lctx.lineWidth = lineWidth;
+      lctx.strokeStyle = color;
+      lctx.fillStyle = color;
+      if (stroke.points.length === 1) {
+        const [cx, cy] = map(stroke.points[0].x, stroke.points[0].y);
+        lctx.beginPath();
+        lctx.arc(cx, cy, lineWidth / 2, 0, Math.PI * 2);
+        lctx.fill();
+      } else {
+        lctx.beginPath();
+        let started = false;
+        for (const p of stroke.points) {
+          const [px, py] = map(p.x, p.y);
+          if (!started) { lctx.moveTo(px, py); started = true; }
+          else lctx.lineTo(px, py);
+        }
+        lctx.stroke();
+      }
+    };
+
+    trace('destination-out', 1, '#000');
+    trace('source-over', opacity, stroke.color);
+  }
+  lctx.globalAlpha = 1;
+
+  // Composite the stroke layer onto the target.
   ctx.save();
   if (sourceRect) {
     ctx.beginPath();
     ctx.rect(0, 0, canvasW, canvasH);
     ctx.clip();
   }
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  for (const stroke of strokes) {
-    const imgMax = sourceRect
-      ? Math.max(canvasW / (sourceRect.width / 100), canvasH / (sourceRect.height / 100))
-      : Math.max(canvasW, canvasH);
-    ctx.strokeStyle = stroke.color;
-    ctx.lineWidth = (stroke.size / 100) * imgMax;
-    ctx.globalAlpha = stroke.opacity ?? 1;
-    ctx.beginPath();
-    let started = false;
-    for (const p of stroke.points) {
-      const lx = sourceRect ? ((p.x - sourceRect.x) / sourceRect.width) * 100 : p.x;
-      const ly = sourceRect ? ((p.y - sourceRect.y) / sourceRect.height) * 100 : p.y;
-      const px = (lx / 100) * canvasW;
-      const py = (ly / 100) * canvasH;
-      if (!started) { ctx.moveTo(px, py); started = true; }
-      else ctx.lineTo(px, py);
-    }
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
+  ctx.drawImage(layer, 0, 0);
   ctx.restore();
 };
 

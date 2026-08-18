@@ -922,6 +922,47 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
     compositeSketchStrokes(octx, image.sketchStrokes || [], overlay.width, overlay.height);
   }, [image.sketchStrokes]);
 
+  // Trace a stroke's shape (path, or a dot for a single point) onto a ctx with
+  // the given composite op / alpha / color. Strokes are rendered "flat": first
+  // erase the shape (destination-out), then draw it at its opacity
+  // (source-over) — overlapping strokes keep the topmost color and never
+  // darken via alpha accumulation.
+  const traceStrokeShape = useCallback((
+    ctx: CanvasRenderingContext2D,
+    stroke: SketchStroke,
+    canvasW: number,
+    canvasH: number,
+    op: GlobalCompositeOperation,
+    alpha: number,
+    color: string
+  ) => {
+    const sizePx = (stroke.size / 100) * Math.max(canvasW, canvasH);
+    ctx.globalCompositeOperation = op;
+    ctx.globalAlpha = alpha;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = sizePx;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    if (stroke.points.length === 1) {
+      const p = stroke.points[0];
+      ctx.beginPath();
+      ctx.arc((p.x / 100) * canvasW, (p.y / 100) * canvasH, sizePx / 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.beginPath();
+      let started = false;
+      for (const p of stroke.points) {
+        const px = (p.x / 100) * canvasW;
+        const py = (p.y / 100) * canvasH;
+        if (!started) { ctx.moveTo(px, py); started = true; }
+        else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }, []);
+
   // Size the overlay to the image and (re)render whenever strokes / mode change.
   useEffect(() => {
     const overlay = sketchOverlayRef.current;
@@ -968,19 +1009,15 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
       if (!live) return;
       const octx = overlay.getContext('2d');
       if (!octx) return;
-      const prev = live.points[live.points.length - 1];
-      const sizePx = (live.size / 100) * Math.max(overlay.width, overlay.height);
-      octx.strokeStyle = live.color;
-      octx.lineWidth = sizePx;
-      octx.lineCap = 'round';
-      octx.lineJoin = 'round';
-      octx.globalAlpha = live.opacity ?? 1;
-      octx.beginPath();
-      octx.moveTo((prev.x / 100) * overlay.width, (prev.y / 100) * overlay.height);
-      octx.lineTo((px / 100) * overlay.width, (py / 100) * overlay.height);
-      octx.stroke();
-      octx.globalAlpha = 1;
       live.points.push({ x: px, y: py });
+      // Redraw the whole live stroke "flat": erase its shape (destination-out,
+      // also removes the previously drawn shorter live stroke), then draw it at
+      // its opacity — self-overlap and overlap over committed strokes never
+      // darken, matching the committed compositeSketchStrokes render.
+      octx.save();
+      traceStrokeShape(octx, live, overlay.width, overlay.height, 'destination-out', 1, '#000');
+      traceStrokeShape(octx, live, overlay.width, overlay.height, 'source-over', live.opacity ?? 1, live.color);
+      octx.restore();
     };
 
     const handleWindowMouseUp = () => {
@@ -999,7 +1036,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
       window.removeEventListener('mousemove', handleWindowMouseMove);
       window.removeEventListener('mouseup', handleWindowMouseUp);
     };
-  }, [brushMode, isOriginalMode, isSketchPainting, brushEraser, brushSize, image.id, image.sketchStrokes, onUpdateSketchStrokes]);
+  }, [brushMode, isOriginalMode, isSketchPainting, brushEraser, brushSize, image.id, image.sketchStrokes, onUpdateSketchStrokes, traceStrokeShape]);
 
   // A completed region's patch overlay shows when:
   // - result view: always (all completed patches), unchanged
@@ -1070,14 +1107,14 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
                 points: [{ x: px, y: py }],
               };
               const octx = overlay.getContext('2d');
-              if (octx) {
-                const sizePx = (brushSize / 100) * Math.max(overlay.width, overlay.height);
-                octx.fillStyle = brushColor;
-                octx.globalAlpha = brushOpacity;
-                octx.beginPath();
-                octx.arc((px / 100) * overlay.width, (py / 100) * overlay.height, sizePx / 2, 0, Math.PI * 2);
-                octx.fill();
-                octx.globalAlpha = 1;
+              if (octx && liveStrokeRef.current) {
+                // Flat dot: erase the shape (removes strokes under it), then
+                // draw at opacity — consistent with committed rendering.
+                const stroke = liveStrokeRef.current;
+                octx.save();
+                traceStrokeShape(octx, stroke, overlay.width, overlay.height, 'destination-out', 1, '#000');
+                traceStrokeShape(octx, stroke, overlay.width, overlay.height, 'source-over', stroke.opacity ?? 1, stroke.color);
+                octx.restore();
               }
             }
           } : (e) => {
