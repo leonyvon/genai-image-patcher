@@ -313,6 +313,15 @@ export function useImageManager(performanceMode: PerformanceMode) {
   // Mirrors handleApplyResultAsOriginal but keeps regions and the patch box.
   const handleApplyRegionAsOriginal = useCallback((imageId: string, regionId: string, stitchedUrl: string) => {
     updateImage(imageId, (img) => {
+      const region = img.regions.find((r) => r.id === regionId);
+      // 确认选区绘图更改后，清空完全落在该选区矩形内的草图线条（百分比坐标直接判定）
+      const newStrokes = img.sketchStrokes?.filter((s) =>
+        !s.points.some((p) =>
+          region &&
+          p.x >= region.x && p.x <= region.x + region.width &&
+          p.y >= region.y && p.y <= region.y + region.height
+        )
+      );
       const newRegions = img.regions.map((r) =>
         r.id === regionId
           ? {
@@ -367,6 +376,7 @@ export function useImageManager(performanceMode: PerformanceMode) {
         fullAiResultUrl: undefined,
         history: newHistory,
         historyIndex: newIndex,
+        sketchStrokes: newStrokes && newStrokes.length > 0 ? newStrokes : undefined,
       };
     });
     setViewMode('original');
