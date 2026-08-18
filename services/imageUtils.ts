@@ -414,8 +414,10 @@ export const depadImageFromSquare = async (
 /**
  * Draws sketch guidance strokes onto a canvas context.
  * Coordinates are image-relative percentages (0-100); size is a percentage
- * of the image's max dimension — the formula works on any canvas that has
- * the image's aspect ratio (overlay, crop, full mask).
+ * of the image's max dimension. Without sourceRect the stroke width is
+ * proportional to the canvas (overlay / full-mask case). With sourceRect
+ * (region-crop case) the stroke width is scaled to the image's native max
+ * dimension, so a 1:1 native-pixel crop keeps the drawn width.
  * When sourceRect (a Region in image-relative %) is given, strokes are
  * clipped to the canvas rect and mapped into it (region-crop case).
  */
@@ -436,8 +438,11 @@ export const compositeSketchStrokes = (
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   for (const stroke of strokes) {
+    const imgMax = sourceRect
+      ? Math.max(canvasW / (sourceRect.width / 100), canvasH / (sourceRect.height / 100))
+      : Math.max(canvasW, canvasH);
     ctx.strokeStyle = stroke.color;
-    ctx.lineWidth = (stroke.size / 100) * Math.max(canvasW, canvasH);
+    ctx.lineWidth = (stroke.size / 100) * imgMax;
     ctx.beginPath();
     let started = false;
     for (const p of stroke.points) {

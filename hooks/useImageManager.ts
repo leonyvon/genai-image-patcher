@@ -314,7 +314,7 @@ export function useImageManager(performanceMode: PerformanceMode) {
   const handleApplyRegionAsOriginal = useCallback((imageId: string, regionId: string, stitchedUrl: string) => {
     updateImage(imageId, (img) => {
       const region = img.regions.find((r) => r.id === regionId);
-      // 确认选区绘图更改后，清空完全落在该选区矩形内的草图线条（百分比坐标直接判定）
+      // 确认选区绘图更改后，清空任意点落在该选区矩形内的草图线条（百分比坐标直接判定）
       const newStrokes = img.sketchStrokes?.filter((s) =>
         !s.points.some((p) =>
           region &&

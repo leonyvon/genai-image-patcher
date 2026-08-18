@@ -647,6 +647,9 @@ const [confirmClearStrokes, setConfirmClearStrokes] = useState(false);
       setConfirmClearStrokes(false);
   }, [selectedImage, updateImage]);
 
+  // Reset the clear-confirm state when switching to a different image.
+  useEffect(() => { setConfirmClearStrokes(false); }, [selectedImage?.id]);
+
   // ON-DEMAND STITCHING for Download
   const handleDownload = useCallback(async () => {
       if (!selectedImage) return;
@@ -1036,7 +1039,7 @@ const [confirmClearStrokes, setConfirmClearStrokes] = useState(false);
                     </div>
                   )}
                   {/* Sketch brush tool panel */}
-                  {brushMode && (
+                  {brushMode && viewMode === 'original' && (
                     <div className="absolute top-16 left-4 z-10 flex flex-col gap-2 p-3 rounded-xl bg-skin-surface/90 backdrop-blur-md border border-skin-border shadow-xl">
                       <div className="flex gap-1.5">
                         {['#ff3b30', '#3b82f6', '#22c55e', '#eab308', '#ffffff', '#111111'].map(c => (

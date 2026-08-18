@@ -422,6 +422,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
   const [isSketchPainting, setIsSketchPainting] = useState(false);
   const sketchOverlayRef = useRef<HTMLCanvasElement | null>(null);
   const liveStrokeRef = useRef<SketchStroke | null>(null);
+  const cursorRingRef = useRef<HTMLDivElement | null>(null);
 
   // Signature that captures only the fields we care about for the restore composite.
   // Identity of `image.regions` changes on every drag/prompt edit, but the signature
@@ -933,11 +934,20 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
     if (!brushMode || !isOriginalMode) return;
 
     const handleWindowMouseMove = (e: MouseEvent) => {
-      if (!isSketchPainting || !sketchOverlayRef.current) return;
       const overlay = sketchOverlayRef.current;
+      if (!overlay) return;
       const rect = overlay.getBoundingClientRect();
       const px = ((e.clientX - rect.left) / rect.width) * 100;
       const py = ((e.clientY - rect.top) / rect.height) * 100;
+
+      // Cursor ring follows the pointer in brush mode (hover + painting)
+      if (cursorRingRef.current) {
+        cursorRingRef.current.style.display = 'block';
+        cursorRingRef.current.style.left = `${px}%`;
+        cursorRingRef.current.style.top = `${py}%`;
+      }
+
+      if (!isSketchPainting) return;
 
       if (brushEraser) {
         // Vector eraser: remove whole strokes whose any point is within radius
@@ -1039,6 +1049,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
           } : brushMode && isOriginalMode ? (e) => {
             // Sketch brush: start a new guidance stroke (or erase)
             if (e.button !== 0) return;
+            if (disabled) return;
             if (e.altKey || spaceHeldRef.current) return;
             const overlay = sketchOverlayRef.current;
             if (!overlay) return;
@@ -1067,6 +1078,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
             if (e.button === 0 && (e.altKey || spaceHeldRef.current)) return;
             handleBackgroundMouseDown(e);
           }}
+          onMouseLeave={() => { if (cursorRingRef.current) cursorRingRef.current.style.display = 'none'; }}
           style={{
             width: imgW,
             height: imgH,
@@ -1085,6 +1097,22 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
             />
           )}
 
+          {/* Sketch brush cursor ring (brush-mode only, zoom-compensated) */}
+          {brushMode && isOriginalMode && (
+            <div
+              ref={cursorRingRef}
+              className="absolute pointer-events-none rounded-full border-2 border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.5)]"
+              style={{
+                display: 'none',
+                width: (brushSize / 100) * Math.max(imgW, imgH),
+                height: (brushSize / 100) * Math.max(imgW, imgH),
+                transform: `translate(-50%, -50%) scale(${invZoom})`,
+                transformOrigin: 'center',
+                zIndex: 8,
+              }}
+            />
+          )}
+
           {/* Sketch brush overlay: AI-visible guidance strokes (hidden in result view) */}
           <canvas
             ref={sketchOverlayRef}
@@ -1092,7 +1120,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
             style={{
               width: '100%',
               height: '100%',
-              zIndex: 4,
+              zIndex: 7,
               display: isOriginalMode && (brushMode || (image.sketchStrokes && image.sketchStrokes.length > 0)) ? 'block' : 'none',
             }}
           />
