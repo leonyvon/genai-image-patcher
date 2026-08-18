@@ -1,4 +1,11 @@
 
+export interface SketchStroke {
+  id: string;
+  color: string;                      // hex，如 '#ff3b30'
+  size: number;                       // 粗细：图片最大边长的百分比（0-100），与 restoreBrushSize 语义一致
+  points: { x: number; y: number }[]; // 百分比坐标 0-100，相对整图
+}
+
 export interface RestoreBox {
   id: string;
   x: number;       // Percentage 0-100 relative to the region (not the full image)
@@ -63,6 +70,8 @@ export interface UploadedImage {
   isReference?: boolean; // If true, image is a grsai reference only — excluded from processing and ZIP export
   /** Compressed base64 data URL stored in config.grsaiReferenceImages (used for badge index and unmarking). */
   referenceBase64?: string;
+  /** AI 可见的草图指引线条（矢量、百分比坐标）。永不写入最终输出，仅合成进 AI 输入。 */
+  sketchStrokes?: SketchStroke[];
 }
 
 export type AiProvider = 'openai' | 'gemini' | 'grsai';
