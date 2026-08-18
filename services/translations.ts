@@ -62,6 +62,12 @@ export const translations = {
     removeBrushModeDesc: "在图上涂抹要移除的内容，点击执行后由本地 LaMa 填充背景",
     executeRemoveBrush: "执行移除",
     clearRemoveBrush: "清除",
+    brushMode: "🖌 画笔",
+    brushModeDesc: "在图上画线作为 AI 草图指引，生成时自动合成进 AI 输入",
+    brushEraser: "橡皮擦",
+    brushClear: "清空",
+    brushClearConfirm: "确认清空?",
+    brushSize: "粗细",
     
     // Settings
     settingsTitle: "连接设置",
@@ -335,6 +341,12 @@ export const translations = {
     removeBrushModeDesc: "Paint over content to erase; local LaMa fills the background on execute",
     executeRemoveBrush: "Erase",
     clearRemoveBrush: "Clear",
+    brushMode: "🖌 Brush",
+    brushModeDesc: "Draw guidance strokes on the image; composited into AI input on generate",
+    brushEraser: "Eraser",
+    brushClear: "Clear",
+    brushClearConfirm: "Confirm clear?",
+    brushSize: "Size",
     
     // Settings
     settingsTitle: "Connection Settings",
