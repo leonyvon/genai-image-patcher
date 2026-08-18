@@ -313,6 +313,7 @@ const [removeBrushSize, setRemoveBrushSize] = useState(8);
 const [brushMode, setBrushMode] = useState(false);
 const [brushColor, setBrushColor] = useState('#ff3b30');
 const [brushSize, setBrushSize] = useState(2);
+const [brushOpacity, setBrushOpacity] = useState(1);
 const [brushEraser, setBrushEraser] = useState(false);
 const [confirmClearStrokes, setConfirmClearStrokes] = useState(false);
   
@@ -1055,6 +1056,13 @@ const [confirmClearStrokes, setConfirmClearStrokes] = useState(false);
                           className="w-24 h-1 accent-sky-500" />
                         <span className="text-[10px] text-skin-muted w-4">{brushSize}</span>
                       </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-skin-muted">{t(config.language, 'brushOpacity')}</span>
+                        <input type="range" min="0.1" max="1" step="0.05" value={brushOpacity}
+                          onChange={(e) => setBrushOpacity(Number(e.target.value))}
+                          className="w-24 h-1 accent-sky-500" />
+                        <span className="text-[10px] text-skin-muted w-4">{Math.round(brushOpacity * 100)}%</span>
+                      </div>
                       <div className="flex gap-1.5">
                         <button onClick={() => setBrushEraser(!brushEraser)}
                           className={`px-2 py-1 text-[10px] font-bold rounded border ${brushEraser ? 'bg-rose-500 text-white border-rose-500' : 'bg-skin-surface text-skin-text border-skin-border hover:bg-skin-surface'}`}>
@@ -1137,6 +1145,7 @@ const [confirmClearStrokes, setConfirmClearStrokes] = useState(false);
                     brushMode={brushMode}
                     brushColor={brushColor}
                     brushSize={brushSize}
+                    brushOpacity={brushOpacity}
                     brushEraser={brushEraser}
                     onUpdateSketchStrokes={brushMode ? handleUpdateSketchStrokes : undefined}
                     onClearSketchStrokes={brushMode ? handleClearSketchStrokes : undefined}

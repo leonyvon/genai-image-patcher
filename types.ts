@@ -3,6 +3,7 @@ export interface SketchStroke {
   id: string;
   color: string;                      // hex，如 '#ff3b30'
   size: number;                       // 粗细：图片最大边长的百分比（0-100），与 restoreBrushSize 语义一致
+  opacity?: number;                   // 透明度 0-1，默认 1（画笔设置快照，同 color/size）
   points: { x: number; y: number }[]; // 百分比坐标 0-100，相对整图
 }
 

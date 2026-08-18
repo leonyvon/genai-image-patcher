@@ -52,6 +52,7 @@ interface EditorCanvasProps {
   brushMode?: boolean;
   brushColor?: string;
   brushSize?: number;
+  brushOpacity?: number;
   brushEraser?: boolean;
   onUpdateSketchStrokes?: (imageId: string, strokes: SketchStroke[]) => void;
   onClearSketchStrokes?: () => void;
@@ -109,6 +110,7 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
     brushMode = false,
     brushColor = '#ff3b30',
     brushSize = 2,
+    brushOpacity = 1,
     brushEraser = false,
     onUpdateSketchStrokes,
     onClearSketchStrokes,
@@ -972,10 +974,12 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
       octx.lineWidth = sizePx;
       octx.lineCap = 'round';
       octx.lineJoin = 'round';
+      octx.globalAlpha = live.opacity ?? 1;
       octx.beginPath();
       octx.moveTo((prev.x / 100) * overlay.width, (prev.y / 100) * overlay.height);
       octx.lineTo((px / 100) * overlay.width, (py / 100) * overlay.height);
       octx.stroke();
+      octx.globalAlpha = 1;
       live.points.push({ x: px, y: py });
     };
 
@@ -1062,15 +1066,18 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
                 id: crypto.randomUUID(),
                 color: brushColor,
                 size: brushSize,
+                opacity: brushOpacity,
                 points: [{ x: px, y: py }],
               };
               const octx = overlay.getContext('2d');
               if (octx) {
                 const sizePx = (brushSize / 100) * Math.max(overlay.width, overlay.height);
                 octx.fillStyle = brushColor;
+                octx.globalAlpha = brushOpacity;
                 octx.beginPath();
                 octx.arc((px / 100) * overlay.width, (py / 100) * overlay.height, sizePx / 2, 0, Math.PI * 2);
                 octx.fill();
+                octx.globalAlpha = 1;
               }
             }
           } : (e) => {

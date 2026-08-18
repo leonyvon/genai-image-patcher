@@ -443,6 +443,7 @@ export const compositeSketchStrokes = (
       : Math.max(canvasW, canvasH);
     ctx.strokeStyle = stroke.color;
     ctx.lineWidth = (stroke.size / 100) * imgMax;
+    ctx.globalAlpha = stroke.opacity ?? 1;
     ctx.beginPath();
     let started = false;
     for (const p of stroke.points) {
@@ -454,6 +455,7 @@ export const compositeSketchStrokes = (
       else ctx.lineTo(px, py);
     }
     ctx.stroke();
+    ctx.globalAlpha = 1;
   }
   ctx.restore();
 };

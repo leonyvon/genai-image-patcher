@@ -68,6 +68,7 @@ export const translations = {
     brushClear: "清空",
     brushClearConfirm: "确认清空?",
     brushSize: "粗细",
+    brushOpacity: "透明度",
     
     // Settings
     settingsTitle: "连接设置",
@@ -347,6 +348,7 @@ export const translations = {
     brushClear: "Clear",
     brushClearConfirm: "Confirm clear?",
     brushSize: "Size",
+    brushOpacity: "Opacity",
     
     // Settings
     settingsTitle: "Connection Settings",
