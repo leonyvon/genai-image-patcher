@@ -1,7 +1,7 @@
 
 import { useState, useRef, useMemo } from 'react';
 import { AppConfig, ProcessingStep, UploadedImage, Region } from '../types';
-import { loadImage, createMultiMaskedFullImage, createInvertedMultiMaskedFullImage, cropRegion, padImageToSquare, depadImageByRatio, depadImageFromSquare, stitchImageInverted, extractCropFromFullImage, compressImageToTargetSize, PaddingInfo, urlToBase64, base64ToObjectURLAsync, releaseObjectURL, isEffectiveReference } from '../services/imageUtils';
+import { loadImage, createMultiMaskedFullImage, createInvertedMultiMaskedFullImage, cropRegion, padImageToSquare, depadImageByRatio, depadImageFromSquare, stitchImage, stitchImageInverted, extractCropFromFullImage, compressImageToTargetSize, PaddingInfo, urlToBase64, base64ToObjectURLAsync, releaseObjectURL, isEffectiveReference } from '../services/imageUtils';
 import { generateRegionEdit, generateTranslation } from '../services/aiService';
 import { playCompletionSound } from '../services/sound';
 import { AsyncSemaphore, runWithConcurrency } from '../services/concurrencyUtils';
@@ -99,19 +99,43 @@ export function useImageProcessor(
         const regionsToProcess = allActiveRegions.filter(r => (r.status === 'pending' || r.status === 'failed') && !r.contextOnly);
         if (regionsToProcess.length === 0) return;
 
-        const imgElement = await loadImage(imageSnapshot.originalUrl || imageSnapshot.previewUrl);
+        // 已完成补丁（含 IOPaint 涂抹/选区移除）合成进 AI 输入基底：AI 编辑的是"用户当前看到的画面"，
+        // 而不是原始图。排除本次要处理的选区（重置后无补丁；即便残留也不应把旧补丁喂给 AI）。
+        const completedPatchesToComposite = allActiveRegions.filter(
+            r => r.status === 'completed' && !!r.processedImageUrl && !regionsToProcess.some(p => p.id === r.id)
+        );
+        // 单选区裁剪路径用原图基底（保裁剪清晰）；全图遮罩/翻译上下文用 preview 基底（保 mask 画布内存）。
+        let compositedOriginalUrl: string | null = null;
+        let compositedPreviewUrl: string | null = null;
+        if (completedPatchesToComposite.length > 0) {
+            if (!config.useFullImageMasking) {
+                compositedOriginalUrl = await stitchImage(imageSnapshot.originalUrl || imageSnapshot.previewUrl, completedPatchesToComposite);
+            }
+            if (imageSnapshot.previewUrl && imageSnapshot.previewUrl !== imageSnapshot.originalUrl) {
+                compositedPreviewUrl = await stitchImage(imageSnapshot.previewUrl, completedPatchesToComposite);
+            }
+        }
+        const releaseCompositedBases = () => {
+            if (compositedOriginalUrl) releaseObjectURL(compositedOriginalUrl);
+            if (compositedPreviewUrl && compositedPreviewUrl !== compositedOriginalUrl) releaseObjectURL(compositedPreviewUrl);
+        };
+
         // The mask canvas is created at the source image resolution. Using the
         // original (e.g. 6000x8000) burns ~190MB of canvas memory; the preview
         // is already capped at 2048 in balanced mode, so prefer it for mask
         // input. cropRegion / single-region path keeps imgElement at full res
         // so per-region crops sent to the API stay sharp.
+        const imgElement = await loadImage(compositedOriginalUrl ?? (imageSnapshot.originalUrl || imageSnapshot.previewUrl));
         const maskImg = imageSnapshot.previewUrl && imageSnapshot.previewUrl !== imageSnapshot.originalUrl
-            ? await loadImage(imageSnapshot.previewUrl)
+            ? await loadImage(compositedPreviewUrl ?? imageSnapshot.previewUrl)
             : imgElement;
         regionsToProcess.forEach(r => regionsMap.set(r.id, { ...r, status: 'processing' }));
         updateImage(imageSnapshot.id, img => ({ ...img, regions: Array.from(regionsMap.values()) }));
 
-        if (signal.aborted) return;
+        if (signal.aborted) {
+            releaseCompositedBases();
+            return;
+        }
         setProcessingState(ProcessingStep.CROPPING);
 
         if (config.useFullImageMasking) {
@@ -303,6 +327,7 @@ export function useImageProcessor(
             } finally {
                 globalSemaphore.release();
             }
+            releaseCompositedBases();
             return;
         }
 
@@ -510,6 +535,7 @@ export function useImageProcessor(
 
         // Release shared context URL after all regions are done
         if (maskedContextUrl) releaseObjectURL(maskedContextUrl);
+        releaseCompositedBases();
     };
 
     const handleProcess = async (processAll: boolean) => {
