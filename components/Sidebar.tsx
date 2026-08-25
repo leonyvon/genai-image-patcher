@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AppConfig, ProcessingStep, UploadedImage, ThemeType } from '../types';
 import { fetchOpenAIModels } from '../services/aiService';
 import { stitchImageInverted, isEffectiveReference } from '../services/imageUtils';
@@ -90,7 +90,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [isZipping, setIsZipping] = useState(false);
   const [processAll, setProcessAll] = useState(false);
   const [detectScope, setDetectScope] = useState<'current' | 'all'>('current');
-  const [clearConfirmation, setClearConfirmation] = useState(false); 
+  const [clearConfirmation, setClearConfirmation] = useState(false);
+  const [modeHelpOpen, setModeHelpOpen] = useState(false);
+  const modeHelpRef = useRef<HTMLDivElement>(null); 
   
   // Initialize sections state from localStorage or default
   const [sectionsState, setSectionsState] = useState(() => {
@@ -124,6 +126,25 @@ const Sidebar: React.FC<SidebarProps> = ({
   useEffect(() => {
     localStorage.setItem(SECTION_STORAGE_KEY, JSON.stringify(sectionsState));
   }, [sectionsState]);
+
+  // Close mode help popover on Esc or click outside
+  useEffect(() => {
+    if (!modeHelpOpen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setModeHelpOpen(false);
+    };
+    const handleClick = (e: MouseEvent) => {
+      if (modeHelpRef.current && !modeHelpRef.current.contains(e.target as Node)) {
+        setModeHelpOpen(false);
+      }
+    };
+    document.addEventListener('keydown', handleKey);
+    document.addEventListener('mousedown', handleClick);
+    return () => {
+      document.removeEventListener('keydown', handleKey);
+      document.removeEventListener('mousedown', handleClick);
+    };
+  }, [modeHelpOpen]);
 
   // Scroll gallery to selected thumbnail when selection changes (e.g. arrow keys)
   useEffect(() => {
@@ -485,22 +506,48 @@ const Sidebar: React.FC<SidebarProps> = ({
            )}
         </Section>
         
-        <Section title={t(lang, 'modeTitle')} isOpen={sectionsState.workflow} onToggle={() => toggleSection('workflow')}>
-           <div className="flex bg-skin-fill p-1 rounded-lg border border-skin-border">
-               {(['api', 'manual'] as const).map(m => (
-                 <button
-                   key={m}
-                   onClick={() => {
-                       handleConfigChange('processingMode', m);
-                       if (m === 'manual') {
-                           setSectionsState(prev => ({ ...prev, manual: true }));
-                       }
-                   }}
-                   className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${config.processingMode === m ? 'bg-skin-surface text-skin-primary shadow-sm' : 'text-skin-muted hover:text-skin-text'}`}
-                 >
-                    {m === 'api' ? t(lang, 'modeApi') : t(lang, 'modeManual')}
-                 </button>
-               ))}
+        <Section title={t(lang, 'modeTitle')} isOpen={sectionsState.workflow} onToggle={() => toggleSection('workflow')} onHelp={() => { setModeHelpOpen(prev => !prev); setSectionsState(prev => ({ ...prev, workflow: true })); }}>
+           <div>
+              {modeHelpOpen && (
+                <div
+                  ref={modeHelpRef}
+                  className="mb-3 bg-skin-surface border border-skin-border rounded-lg shadow-sm p-3"
+                >
+                  <h4 className="text-xs font-bold text-skin-text mb-2">{t(lang, 'modeHelpTitle')}</h4>
+                  <div className="space-y-2">
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-skin-primary flex-shrink-0" />
+                        <span className="text-[11px] font-semibold text-skin-text">{t(lang, 'modeHelpApiTitle')}</span>
+                      </div>
+                      <p className="text-[10px] text-skin-muted leading-relaxed pl-3">{t(lang, 'modeHelpApiDesc')}</p>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-skin-primary flex-shrink-0" />
+                        <span className="text-[11px] font-semibold text-skin-text">{t(lang, 'modeHelpCodexTitle')}</span>
+                      </div>
+                      <p className="text-[10px] text-skin-muted leading-relaxed pl-3">{t(lang, 'modeHelpCodexDesc')}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className="flex bg-skin-fill p-1 rounded-lg border border-skin-border">
+                  {(['api', 'manual'] as const).map(m => (
+                    <button
+                      key={m}
+                      onClick={() => {
+                          handleConfigChange('processingMode', m);
+                          if (m === 'manual') {
+                              setSectionsState(prev => ({ ...prev, manual: true }));
+                          }
+                      }}
+                      className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${config.processingMode === m ? 'bg-skin-surface text-skin-primary shadow-sm' : 'text-skin-muted hover:text-skin-text'}`}
+                    >
+                       {m === 'api' ? t(lang, 'modeApi') : t(lang, 'modeManual')}
+                    </button>
+                  ))}
+              </div>
            </div>
         </Section>
 
@@ -748,24 +795,28 @@ const Sidebar: React.FC<SidebarProps> = ({
          
          {!isProcessing ? (
            <div className="space-y-2">
-             <button 
-                onClick={() => onProcess(processAll)}
-                disabled={!!getDisabledReason()}
-                className="w-full py-3 bg-skin-primary hover:bg-opacity-90 disabled:bg-skin-muted disabled:cursor-not-allowed text-skin-primary-fg font-bold rounded-lg shadow-lg shadow-skin-primary/20 transition-all active:scale-95 flex items-center justify-center gap-2"
-                title={getDisabledReason()}
-             >
-                {t(lang, processAll ? 'generateAll' : 'generate')}
-             </button>
-             
-             <label className="flex items-center justify-center gap-2 cursor-pointer select-none">
-                <input 
-                  type="checkbox" 
-                  checked={processAll} 
-                  onChange={(e) => setProcessAll(e.target.checked)} 
-                  className="rounded border-skin-border text-skin-primary focus:ring-skin-primary"
-                />
-                <span className="text-xs text-skin-muted">{t(lang, 'applyAll', { count: images.length })}</span>
-             </label>
+             {!isManualMode && (
+               <>
+                 <button 
+                    onClick={() => onProcess(processAll)}
+                    disabled={!!getDisabledReason()}
+                    className="w-full py-3 bg-skin-primary hover:bg-opacity-90 disabled:bg-skin-muted disabled:cursor-not-allowed text-skin-primary-fg font-bold rounded-lg shadow-lg shadow-skin-primary/20 transition-all active:scale-95 flex items-center justify-center gap-2"
+                    title={getDisabledReason()}
+                 >
+                    {t(lang, processAll ? 'generateAll' : 'generate')}
+                 </button>
+                 
+                 <label className="flex items-center justify-center gap-2 cursor-pointer select-none">
+                    <input 
+                      type="checkbox" 
+                      checked={processAll} 
+                      onChange={(e) => setProcessAll(e.target.checked)} 
+                      className="rounded border-skin-border text-skin-primary focus:ring-skin-primary"
+                    />
+                    <span className="text-xs text-skin-muted">{t(lang, 'applyAll', { count: images.length })}</span>
+                 </label>
+               </>
+             )}
 
              <div className="grid grid-cols-2 gap-2">
                  {(currentImage?.finalResultUrl || currentImage?.regions.some(r => r.status === 'completed')) && (

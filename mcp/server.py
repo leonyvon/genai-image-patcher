@@ -307,6 +307,34 @@ def get_region_patch(image_id: str, region_id: str, output_path: str) -> str:
     return _ok({"path": str(out), "mime": result.get("mime", "image/png"), "kind": result.get("kind", "patch")})
 
 
+@mcp.tool()
+def set_region_patch(image_id: str, region_id: str, file_path: str) -> str:
+    """把本地生成的图片文件作为补丁替换到指定选区（codex 生成模式）。file_path 为本地图片绝对路径（codex 自行生成的图片）。
+    应用侧按现有手动修补链路把该图设为选区补丁（status→completed、锚点对齐），之后 get_region_patch / get_full_image 立即可取。
+    注意：只替换已有选区，不创建选区；与 generate 的参考图门禁无关，任意生成模式可用。"""
+    if not _ensure_bridge():
+        return _err("桥接服务不可达")
+    path = Path(file_path).expanduser()
+    if not path.is_file():
+        return _err(f"文件不存在: {file_path}")
+    try:
+        r = httpx.post(
+            f"{BRIDGE_URL}/files?name={path.name}",
+            content=path.read_bytes(),
+            timeout=120,
+            trust_env=False,
+        )
+        r.raise_for_status()
+        fdata = r.json()
+    except Exception as e:
+        return _err(f"上传文件失败 {file_path}: {e}")
+    url = fdata.get("url")
+    if not url:
+        return _err(f"上传文件失败 {file_path}: 桥接未返回文件 URL")
+    res = _cmd("set_region_patch", {"image_id": image_id, "region_id": region_id, "url": url})
+    return _ok(res) if res.get("ok") else _err(str(res.get("error")))
+
+
 def main():
     atexit.register(lambda: _bridge_proc and _bridge_proc.terminate())
     mcp.run()

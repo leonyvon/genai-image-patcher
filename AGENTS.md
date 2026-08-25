@@ -20,6 +20,8 @@
 - **回调签名陷阱**（本 session 踩过）：EditorCanvas 传给 App 的回调若签名为 `(imageId, regionId)` 两参，App 侧包装**必须透传两参**（`(imageId, regionId) => wrapper(imageId, regionId)`）；写成单参 `(regionId) => wrapper(selectedImage.id, regionId)` 会让 wrapper 收到 imageId 当 regionId，查无选区**静默 no-op**——点击无反应时先查参数透传。
 - **选区级"应用为原图"**（✅ 调整后状态 = `handleApplyRegionAsOriginal`）：只烙**当前选区**——`stitchImage(img.originalUrl, [region])` 拼合 → 更新 `originalUrl`/`previewUrl`/`finalResultUrl` → 该选区回 pending（清补丁/还原/锚点）→ 推历史快照可撤销，其他选区不动。**不要**用整图 `handleApplyResultAsOriginal`（会清空全部选区）；拼合基图必须 `originalUrl`（保全分辨率）。
 - **MCP 阻塞超时与重启**：`generate` 阻塞时长依赖 bridge `COMMAND_TIMEOUT_MS`（600s，`bridge/server.mjs`）与 `mcp/server.py` httpx `timeout=600`——两者须 ≥ 浏览器端最长生成；**改超时后必须重启 bridge/MCP 服务才生效**（MCP 自动拉起的旧实例仍带旧超时，长生成会被 120s/180s 旧超时打断）。
+- **模式标签**：工作流模式已更名「生成模式」（子项：内置生成=api / codex生成=manual）；`processingMode` 枚举不变。
+- **set_region_patch**（codex 生成链路）：MCP 工具 → bridge `/files` 上传 → `App.tsx bridgeHandlers.set_region_patch` → **必须复用 `handleManualPatchUpdate`** 设 `processedImageUrl`+`status='completed'`+锚点（勿绕过该入口直接改 Region；全图遮罩走 `special-full-image-mask` 分支）。
 
 ## 选区视图与工具栏交互（2026-08-16 新增）
 

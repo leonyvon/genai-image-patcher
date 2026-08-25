@@ -146,6 +146,13 @@ const httpServer = createServer((req, res) => {
   }
   if (req.method === 'GET' && url.pathname.startsWith('/files/')) {
     const filePath = path.join(FILE_DIR, path.basename(url.pathname));
+    const ext = path.extname(filePath).toLowerCase();
+    const mime = {
+      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+      '.avif': 'image/avif', '.tiff': 'image/tiff', '.tif': 'image/tiff',
+    }[ext] || 'application/octet-stream';
+    res.setHeader('Content-Type', mime);
     createReadStream(filePath).on('error', () => { json(res, 404, { error: 'not found' }); }).pipe(res);
     return;
   }

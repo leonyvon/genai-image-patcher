@@ -240,6 +240,24 @@ export default function App() {
       }
       return { ok: true };
     },
+    set_region_full_redraw: async ({ image_id, region_id, enabled }) => {
+      const img = images.find((i) => i.id === image_id);
+      if (!img) return { ok: false, error: `image not found: ${image_id}` };
+      if (!img.regions.some((r) => r.id === region_id)) return { ok: false, error: `region not found: ${region_id}` };
+      handleSetRegionFullRedraw(image_id, region_id, !!enabled);
+      return { ok: true };
+    },
+    set_region_patch: async ({ image_id, region_id, url }) => {
+      const img = images.find((i) => i.id === image_id);
+      if (!img) return { ok: false, error: `image not found: ${image_id}` };
+      if (region_id !== 'special-full-image-mask' && !img.regions.some((r) => r.id === region_id))
+        return { ok: false, error: `region not found: ${region_id}` };
+      if (typeof url !== 'string' || !url) return { ok: false, error: 'url is required' };
+      if (!/^(https?:\/\/127\.0\.0\.1:3100\/files\/|blob:|data:)/.test(url))
+        return { ok: false, error: 'url must be a bridge /files URL, blob:, or data: URL' };
+      await handleManualPatchUpdate(image_id, region_id, url);
+      return { ok: true, result: { image_id, region_id, status: 'completed' } };
+    },
     generate: async ({ scope }) => {
       if (scope !== 'single' && scope !== 'all') return { ok: false, error: "scope must be 'single' or 'all'" };
       // 镜像 useImageProcessor 的启动判定：无 pending/failed 选区时 handleProcess 会静默 no-op，
@@ -345,7 +363,7 @@ const [confirmClearStrokes, setConfirmClearStrokes] = useState(false);
         if (!targetImg) return;
 
         // Start processing the update
-        (async () => {
+        return (async () => {
             const updatedRegions: Region[] = [];
             
             if (config.useInvertedMasking) {
@@ -406,7 +424,6 @@ const [confirmClearStrokes, setConfirmClearStrokes] = useState(false);
                 });
             }
         })();
-        return;
     }
 
     updateImage(imageId, img => {
@@ -430,7 +447,7 @@ const [confirmClearStrokes, setConfirmClearStrokes] = useState(false);
            if (oldRegion?.processedImageUrl) releaseObjectURL(oldRegion.processedImageUrl);
 
            updatedRegions = img.regions.map(r =>
-              r.id === regionId ? { ...r, processedImageUrl: imageDataUrl, status: 'completed' as const, anchorX: r.x, anchorY: r.y, anchorWidth: r.width, anchorHeight: r.height } : r
+              r.id === regionId ? { ...r, processedImageUrl: imageDataUrl, status: 'completed' as const, anchorX: r.x, anchorY: r.y, anchorWidth: r.width, anchorHeight: r.height, errorMessage: null } : r
            );
         }
 

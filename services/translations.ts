@@ -97,13 +97,13 @@ export const translations = {
     perfUnlimited: "无限制",
     perfBalanced: "性能优先",
     
-    // Workflow Modes
-    modeTitle: "工作流模式",
-    modeApi: "AI 自动生成",
-    modeManual: "手动修补工坊",
+    // Generation Modes
+    modeTitle: "生成模式",
+    modeApi: "内置生成",
+    modeManual: "codex生成",
     
     // Manual Workbench
-    workbenchTitle: "补丁工坊",
+    workbenchTitle: "CODEX工作区",
     sourceCrop: "原始切片",
     patchZone: "回填区 (Ctrl+V)",
     maskedInput: "遮罩输入 (发给AI)",
@@ -112,6 +112,13 @@ export const translations = {
     copied: "已复制",
     pasteHint: "在此处粘贴处理后的图片",
     noRegions: "请先在图片上框选区域",
+    
+    // Generation Mode Help
+    modeHelpTitle: "两种生成模式",
+    modeHelpApiTitle: "内置生成",
+    modeHelpApiDesc: "在应用内直接调用 AI 生成：框选选区 → 填提示词 → 点生成，自动替换选区补丁。",
+    modeHelpCodexTitle: "codex生成",
+    modeHelpCodexDesc: "Codex 通过 MCP 驱动改图：框选选区后由 Codex 生成图片并替换到选区。",
     
     // Patch Editor
     editor_title: "修补编辑器",
@@ -379,13 +386,13 @@ export const translations = {
     perfUnlimited: "Unlimited",
     perfBalanced: "Balanced",
     
-    // Workflow Modes
-    modeTitle: "Workflow Mode",
-    modeApi: "AI Generation",
-    modeManual: "Patch Workbench",
+    // Generation Modes
+    modeTitle: "Generation Mode",
+    modeApi: "Built-in Generation",
+    modeManual: "Codex Generation",
     
     // Manual Workbench
-    workbenchTitle: "Patch Workbench",
+    workbenchTitle: "Codex Workspace",
     sourceCrop: "Source Crop",
     patchZone: "Drop Zone (Ctrl+V)",
     maskedInput: "Masked Input (To AI)",
@@ -394,6 +401,13 @@ export const translations = {
     copied: "Copied",
     pasteHint: "Paste processed image here",
     noRegions: "Draw regions on canvas first",
+    
+    // Generation Mode Help
+    modeHelpTitle: "Two Generation Modes",
+    modeHelpApiTitle: "Built-in Generation",
+    modeHelpApiDesc: "Generate in-app via AI (grsai/OpenAI/Gemini): draw a region, write a prompt, click Generate.",
+    modeHelpCodexTitle: "Codex Generation",
+    modeHelpCodexDesc: "Codex drives the app via MCP: draw a region, Codex generates the image and swaps it in via set_region_patch.",
     
     // Patch Editor
     editor_title: "Patch Editor",
