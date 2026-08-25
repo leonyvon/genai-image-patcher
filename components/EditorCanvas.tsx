@@ -58,6 +58,10 @@ interface EditorCanvasProps {
   onClearSketchStrokes?: () => void;
   /** When enabled, a drawn region's edges snap to the nearest panel border on mouse-up. */
   enablePanelSnap?: boolean;
+  /** Whether to show the same-size full redraw toggle (grsai, standard masking only). */
+  fullRedrawAvailable?: boolean;
+  /** Toggle same-size full redraw for a region. */
+  onToggleFullRedraw?: (regionId: string) => void;
 }
 
 /**
@@ -115,6 +119,8 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
     onUpdateSketchStrokes,
     onClearSketchStrokes,
     enablePanelSnap = true,
+    fullRedrawAvailable = false,
+    onToggleFullRedraw,
 }) => {
   // --- Refs ---
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -1258,6 +1264,12 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
                   : 'border-2 border-dashed border-gray-400 bg-gray-400/5 z-10 cursor-pointer hover:border-amber-400/50';
             }
 
+            if (region.fullRedraw && isOriginalMode) {
+                styleClasses = isSelected
+                  ? 'border-2 border-purple-500 bg-purple-500/20 shadow-[0_0_0_2px_rgba(255,255,255,0.8),0_0_0_4px_#a855f7] z-30 cursor-move'
+                  : 'border-2 border-purple-500 bg-purple-500/10 z-10 cursor-pointer';
+            }
+
             // Compute the region's screen position to decide if action buttons
             // should be placed above or below the region. If the top of the
             // region is too close to the viewport top edge, buttons go below.
@@ -1511,6 +1523,20 @@ const EditorCanvas: React.FC<EditorCanvasProps> = React.memo(({
                             title={region.contextOnly ? 'Context Only (click to enable translation)' : 'Mark as Context Only'}
                           >
                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                          </button>
+                      )}
+                      {!disabled && fullRedrawAvailable && !region.contextOnly && region.status !== 'processing' && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onToggleFullRedraw?.(region.id);
+                            }}
+                            className={`w-6 h-6 border rounded-full flex items-center justify-center shadow-md hover:shadow-lg transition-all text-[8px] font-bold leading-none ${region.fullRedraw ? 'bg-purple-500 text-white border-purple-500' : 'bg-skin-surface text-skin-muted border-skin-border'}`}
+                            title={t(language, 'fullRedraw')}
+                            aria-label={t(language, 'fullRedraw')}
+                          >
+                            <span aria-hidden="true" className="text-[13px] leading-none">🆕</span>
+                            <span className="sr-only">{t(language, 'fullRedrawShort')}</span>
                           </button>
                       )}
                       {!disabled && onFlipRegion && region.status !== 'processing' && (

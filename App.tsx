@@ -61,6 +61,13 @@ export default function App() {
       handleAutoDetect
   } = useImageProcessor(images, updateImage, updateAllImages, config, selectedImage);
 
+  const handleSetRegionFullRedraw = useCallback((imageId: string, regionId: string, enabled: boolean) => {
+    updateImage(imageId, img => ({
+      ...img,
+      regions: img.regions.map(r => r.id === regionId ? { ...r, fullRedraw: enabled } : r),
+    }));
+  }, [updateImage]);
+
   // grsai 全局参考图：图库图片标记/取消标记。标记时压缩并持久化到 config。
   // 有效参考图判定：referenceBase64 必须仍存在于 config.grsaiReferenceImages。
   const referenceToggleInFlight = useRef<Set<string>>(new Set());
@@ -173,6 +180,7 @@ export default function App() {
         customPrompt: r.customPrompt ?? null,
         errorMessage: r.errorMessage ?? null,
         hasResult: !!r.processedImageUrl,
+        fullRedraw: r.fullRedraw ?? false,
       })),
     })),
     config: {
@@ -909,6 +917,12 @@ const [confirmClearStrokes, setConfirmClearStrokes] = useState(false);
   const editorOnAdjustRegionSize = useCallback((regionId: string, isExpand: boolean) => {
       if (selectedImageId_safe) handleAdjustRegion(selectedImageId_safe, regionId, isExpand);
   }, [selectedImageId_safe, handleAdjustRegion]);
+  const editorOnToggleFullRedraw = useCallback((regionId: string) => {
+      if (selectedImageId_safe) {
+          const region = selectedImage?.regions.find(r => r.id === regionId);
+          handleSetRegionFullRedraw(selectedImageId_safe, regionId, !region?.fullRedraw);
+      }
+  }, [selectedImageId_safe, selectedImage, handleSetRegionFullRedraw]);
 
   // Stable adapters for Sidebar.
   const sidebarOnOpenGlobalSettings = useCallback(() => setShowGlobalSettings(true), []);
@@ -1154,6 +1168,8 @@ const [confirmClearStrokes, setConfirmClearStrokes] = useState(false);
                     restoreSelectedRegionId={restoreSelectedRegionId}
                     onSelectRestoreRegion={setRestoreSelectedRegionId}
                     enablePanelSnap={config.enablePanelSnap}
+                    fullRedrawAvailable={config.provider === 'grsai' && !config.useFullImageMasking}
+                    onToggleFullRedraw={editorOnToggleFullRedraw}
                 />
               )}
             </>

@@ -38,6 +38,8 @@ export interface Region {
   restoreBoxes?: RestoreBox[]; // Box-based restore regions (框选还原)
   restoreMaskUrl?: string; // Brush-based restore mask Object URL (涂抹还原), alpha=1=processed, 0=original
   errorMessage?: string; // 最近一次失败的原因（供 MCP 快照与 UI 诊断）
+  /** 同尺寸完全重制：生成时不发选区图，仅按选区尺寸文生图（仅 grsai 生效）。 */
+  fullRedraw?: boolean;
 }
 
 export interface ImageHistoryState {
@@ -101,7 +103,7 @@ export interface AppConfig {
   apiTimeout: number; // in milliseconds
   maxRetries: number; // count
 
-  // Workflow Mode
+  // Generation Mode
   processingMode: ProcessingMode;
 
   // Performance Mode

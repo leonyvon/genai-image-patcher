@@ -167,6 +167,15 @@ def set_prompt(prompt: str, image_id: str | None = None, region_id: str | None =
 
 
 @mcp.tool()
+def set_region_full_redraw(image_id: str, region_id: str, enabled: bool) -> str:
+    """设置某选区的“同尺寸完全重制”开关。enabled=true 时该选区生成不发送选区图，仅按选区尺寸文生图（仅 grsai 生效）。"""
+    if not _ensure_bridge():
+        return _err("桥接服务不可达")
+    res = _cmd("set_region_full_redraw", {"image_id": image_id, "region_id": region_id, "enabled": bool(enabled)})
+    return _ok(res) if res.get("ok") else _err(str(res.get("error")))
+
+
+@mcp.tool()
 def get_image(image_id: str, output_path: str) -> str:
     """把图库中任意一张原图（含参考图）保存为本地文件并返回路径——供目检参考图内容、判断是否仍适用于本次任务。注意：output_path 必须用独立/临时路径。"""
     if not _ensure_bridge():

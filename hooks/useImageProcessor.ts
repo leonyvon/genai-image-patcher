@@ -352,6 +352,13 @@ export function useImageProcessor(
         // LEGACY / SINGLE REGION PROCESSING (Standard Mode Only)
         const processRegionTask = async (region: Region) => {
             if (signal.aborted) return;
+            const isFullRedraw = !!region.fullRedraw && config.provider === 'grsai';
+            const fullRedrawPxW = isFullRedraw
+                ? Math.max(1, Math.round((region.width / 100) * imgElement.naturalWidth))
+                : 0;
+            const fullRedrawPxH = isFullRedraw
+                ? Math.max(1, Math.round((region.height / 100) * imgElement.naturalHeight))
+                : 0;
             await globalSemaphore.acquire();
             // Track URLs created in this task for cleanup on error
             let croppedUrl: string | undefined;
@@ -359,54 +366,60 @@ export function useImageProcessor(
             let translationPayloadUrl: string | undefined;
             let redrawPayloadUrl: string | undefined;
             let apiResultUrl: string | undefined;
+            let payloadUrl: string | undefined;
+            let translationActiveUrl: string | undefined;
+            let redrawActiveUrl: string | undefined;
+            let paddingInfo: PaddingInfo | null = null;
 
             try {
                 if (signal.aborted) return;
-                croppedUrl = await cropRegion(imgElement, region, imageSnapshot.sketchStrokes);
+                if (!isFullRedraw) {
+                    croppedUrl = await cropRegion(imgElement, region, imageSnapshot.sketchStrokes);
+                    payloadUrl = croppedUrl;
 
-                let payloadUrl = croppedUrl;
-                let paddingInfo: PaddingInfo | null = null;
-                if (config.enableSquareFill) {
-                    const padded = await padImageToSquare(croppedUrl);
-                    paddedUrl = padded.url;
-                    payloadUrl = paddedUrl;
-                    paddingInfo = padded.info;
-                    // Release the non-padded crop — we now have the padded version
-                    releaseObjectURL(croppedUrl);
-                    croppedUrl = undefined;
-                }
-
-                if (signal.aborted) return;
-
-                // Compress for AI payload — separate encodings for translation
-                // (smaller target) and redraw (larger target). Per-region crops
-                // are often already under both targets, in which case the WebP
-                // encoder short-circuits at the 0.92 probe.
-                let translationActiveUrl = payloadUrl;
-                let redrawActiveUrl = payloadUrl;
-                if (config.enableAiPayloadCompression) {
-                    redrawPayloadUrl = await compressImageToTargetSize(payloadUrl, { targetSizeKB: config.aiPayloadRedrawTargetKB });
-                    redrawActiveUrl = redrawPayloadUrl;
-                    if (config.enableTranslationMode) {
-                        translationPayloadUrl = await compressImageToTargetSize(payloadUrl, { targetSizeKB: config.aiPayloadTranslationTargetKB });
-                        translationActiveUrl = translationPayloadUrl;
-                    } else {
-                        translationActiveUrl = redrawPayloadUrl;
+                    if (config.enableSquareFill) {
+                        const padded = await padImageToSquare(croppedUrl);
+                        paddedUrl = padded.url;
+                        payloadUrl = paddedUrl;
+                        paddingInfo = padded.info;
+                        // Release the non-padded crop — we now have the padded version
+                        releaseObjectURL(croppedUrl);
+                        croppedUrl = undefined;
                     }
-                    // Original (cropped/padded) no longer needed
-                    releaseObjectURL(payloadUrl);
-                    if (paddedUrl) paddedUrl = undefined;
-                    if (croppedUrl) { releaseObjectURL(croppedUrl); croppedUrl = undefined; }
+
+                    // Compress for AI payload — separate encodings for translation
+                    // (smaller target) and redraw (larger target). Per-region crops
+                    // are often already under both targets, in which case the WebP
+                    // encoder short-circuits at the 0.92 probe.
+                    translationActiveUrl = payloadUrl;
+                    redrawActiveUrl = payloadUrl;
+                    if (config.enableAiPayloadCompression) {
+                        redrawPayloadUrl = await compressImageToTargetSize(payloadUrl, { targetSizeKB: config.aiPayloadRedrawTargetKB });
+                        redrawActiveUrl = redrawPayloadUrl;
+                        if (config.enableTranslationMode) {
+                            translationPayloadUrl = await compressImageToTargetSize(payloadUrl, { targetSizeKB: config.aiPayloadTranslationTargetKB });
+                            translationActiveUrl = translationPayloadUrl;
+                        } else {
+                            translationActiveUrl = redrawPayloadUrl;
+                        }
+                        // Original (cropped/padded) no longer needed
+                        releaseObjectURL(payloadUrl);
+                        payloadUrl = undefined;
+                        paddedUrl = undefined;
+                        croppedUrl = undefined;
+                    }
                 }
 
                 // Convert to base64 lazily; each API call uses its own compressed payload.
                 let translationBase64: string | null = null;
                 let redrawBase64: string | null = null;
                 const getTranslationBase64 = async () => {
+                    if (!translationActiveUrl) throw new Error('Translation input is unavailable');
                     if (translationBase64 == null) translationBase64 = await urlToBase64(translationActiveUrl);
                     return translationBase64;
                 };
                 const getRedrawBase64 = async () => {
+                    if (!redrawActiveUrl) throw new Error('Redraw input is unavailable');
                     if (redrawBase64 == null) redrawBase64 = await urlToBase64(redrawActiveUrl);
                     return redrawBase64;
                 };
@@ -416,7 +429,7 @@ export function useImageProcessor(
                 // cached = prior translation block (if any). Reused both for the
                 // cache-skip check and for rebuilding the prompt below.
                 const { userPart: userCustomPrompt, cached: cachedTranslation } = splitTranslationCache(region.customPrompt);
-                if (config.enableTranslationMode) {
+                if (config.enableTranslationMode && !isFullRedraw) {
                    if (cachedTranslation) {
                        translationText = cachedTranslation;
                    } else {
@@ -457,7 +470,18 @@ export function useImageProcessor(
                 if (translationText) {
                     effectivePrompt += `\n\n${TRANSLATION_CACHE_MARKER}\n${translationText}`;
                 }
-                let apiResultBase64 = await generateRegionEdit(await getRedrawBase64(), effectivePrompt, aiConfig, signal);
+                if (isFullRedraw) {
+                    effectivePrompt += `\nPlease generate an image with width ${fullRedrawPxW} pixels and height ${fullRedrawPxH} pixels.`;
+                }
+                let apiResultBase64: string;
+                if (isFullRedraw) {
+                    apiResultBase64 = await generateRegionEdit('', effectivePrompt, aiConfig, signal, {
+                        fullRedraw: true,
+                        aspectRatioOverride: `${fullRedrawPxW}x${fullRedrawPxH}`,
+                    });
+                } else {
+                    apiResultBase64 = await generateRegionEdit(await getRedrawBase64(), effectivePrompt, aiConfig, signal);
+                }
                 translationBase64 = null; // release reference; let the big string GC
                 redrawBase64 = null;
 
@@ -470,11 +494,12 @@ export function useImageProcessor(
                     releaseObjectURL(redrawPayloadUrl);
                     redrawPayloadUrl = undefined;
                 }
-                if (!config.enableAiPayloadCompression) {
+                if (!isFullRedraw && !config.enableAiPayloadCompression && payloadUrl) {
                     // payloadUrl was the original cropped/padded URL, not yet released
                     releaseObjectURL(payloadUrl);
-                    if (paddedUrl) paddedUrl = undefined;
-                    if (croppedUrl) { releaseObjectURL(croppedUrl); croppedUrl = undefined; }
+                    payloadUrl = undefined;
+                    paddedUrl = undefined;
+                    croppedUrl = undefined;
                 }
 
                 // Convert API base64 result to Object URL
@@ -487,7 +512,7 @@ export function useImageProcessor(
                 }
                 
                 // Depad
-                if (config.enableSquareFill && paddingInfo) {
+                if (!isFullRedraw && config.enableSquareFill && paddingInfo) {
                     const depadResultUrl = config.squareFillMode === 'ratio'
                         ? await depadImageByRatio(apiResultUrl, paddingInfo)
                         : await depadImageFromSquare(apiResultUrl, paddingInfo, config.squareFillMargin);

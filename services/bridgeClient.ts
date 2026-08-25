@@ -7,6 +7,7 @@ export interface BridgeRegionInfo {
   customPrompt: string | null;
   errorMessage: string | null;
   hasResult: boolean;
+  fullRedraw: boolean;
 }
 
 export interface BridgeImageInfo {

@@ -414,7 +414,8 @@ const generateGrsaiImage = async (
   modelName: string,
   signal?: AbortSignal,
   timeoutMs?: number,
-  referenceImages?: string[]
+  referenceImages?: string[],
+  options?: { fullRedraw?: boolean; aspectRatioOverride?: string }
 ): Promise<string> => {
   if (!apiKey) {
     throw new Error("grsai API Key is missing");
@@ -423,6 +424,7 @@ const generateGrsaiImage = async (
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
   const safeApiKey = sanitizeHeaderValue(apiKey);
+  const isFullRedraw = !!options?.fullRedraw;
 
   const url = 'https://grsai.dakka.com.cn/v1/api/generate';
 
@@ -439,23 +441,27 @@ const generateGrsaiImage = async (
     ? imageBase64
     : `data:image/png;base64,${imageBase64}`;
 
-  // Derive the region's real aspect ratio from the slice so the returned patch
-  // matches the selection's proportions (stitch fitScale ≈ 1, no letterboxing).
-  // Falls back to the API default if the slice can't be decoded.
+  // Full redraw has no slice to decode; its exact selection dimensions are
+  // supplied by the processor. Otherwise derive the ratio from the slice so
+  // the returned patch matches the selection's proportions.
   let aspectRatio = '1024x1024';
-  try {
-    const { width, height } = await getImageDimensionsFromBase64(dataUrl);
-    if (width > 0 && height > 0) {
-      aspectRatio = `${width}x${height}`;
+  if (isFullRedraw && options?.aspectRatioOverride) {
+    aspectRatio = options.aspectRatioOverride;
+  } else {
+    try {
+      const { width, height } = await getImageDimensionsFromBase64(dataUrl);
+      if (width > 0 && height > 0) {
+        aspectRatio = `${width}x${height}`;
+      }
+    } catch (e) {
+      console.warn('grsai: could not derive slice dimensions, falling back to 1024x1024:', e);
     }
-  } catch (e) {
-    console.warn('grsai: could not derive slice dimensions, falling back to 1024x1024:', e);
   }
 
   const body = {
     model: modelName,
     prompt: prompt,
-    images: [dataUrl, ...(referenceImages ?? [])],
+    images: isFullRedraw ? [...(referenceImages ?? [])] : [dataUrl, ...(referenceImages ?? [])],
     aspectRatio,
     replyType: 'json',
   };
@@ -465,9 +471,9 @@ const generateGrsaiImage = async (
     model: body.model,
     aspectRatio: body.aspectRatio,
     replyType: body.replyType,
-    imageMime: body.images[0].slice(0, 30),
-    imageDataLength: body.images[0].length,
-    referenceCount: body.images.length - 1,
+    imageMime: body.images[0]?.slice(0, 30) || null,
+    imageDataLength: body.images[0] ? body.images[0].length : 0,
+    referenceCount: isFullRedraw ? body.images.length : body.images.length - 1,
     promptLength: body.prompt.length,
     promptHead: body.prompt.slice(0, 100),
   });
@@ -628,7 +634,8 @@ export const generateRegionEdit = async (
   imageBase64: string,
   prompt: string,
   config: AppConfig,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: { fullRedraw?: boolean; aspectRatioOverride?: string }
 ): Promise<string> => {
 
   // Default to 60s timeout and 0 retries if not configured (backwards compat)
@@ -640,7 +647,7 @@ export const generateRegionEdit = async (
   const worker = async (opSignal: AbortSignal) => {
     if (config.provider === 'grsai') {
       if (!config.grsaiApiKey) throw new Error("grsai API Key is missing");
-      return generateGrsaiImage(imageBase64, prompt, config.grsaiApiKey, config.grsaiModel, opSignal, timeout, config.grsaiReferenceImages);
+      return generateGrsaiImage(imageBase64, prompt, config.grsaiApiKey, config.grsaiModel, opSignal, timeout, config.grsaiReferenceImages, options);
     } else if (config.provider === 'openai') {
       if (!config.openaiApiKey) throw new Error("OpenAI API Key is missing");
       return generateOpenAIImage(imageBase64, prompt, config, opSignal);
