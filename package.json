@@ -6,6 +6,7 @@
   "scripts": {
     "predev": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-iopaint.ps1",
     "dev": "vite",
+    "start:workbench": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-patcher.ps1 -OpenBrowser",
     "build": "vite build",
     "preview": "vite preview",
     "bridge": "node bridge/server.mjs"

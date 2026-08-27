@@ -51,15 +51,16 @@
 
 ## MCP 桥接（genai-bridge-mcp，人机协作改图）
 
-- 三层：`mcp/server.py`（FastMCP 工具翻译）→ `bridge/server.mjs`（Node，127.0.0.1:3100，HTTP+WS+文件中转，MCP 自动拉起）→ `hooks/useBridge.ts`（浏览器侧，命令映射到 App 处理器 + 状态快照推送）。
+- 三层：`mcp/server.py`（FastMCP 工具翻译，可自动启动工作台）→ `bridge/server.mjs`（Node，127.0.0.1:3100，HTTP+WS+文件中转，MCP 自动拉起）→ `hooks/useBridge.ts`（浏览器侧，命令映射到 App 处理器 + 状态快照推送）。插件首次调用工具时会自动启动 Vite 前端（127.0.0.1:3000）和 bridge；Agent 再使用 Codex 内置浏览器打开工作台。
 - **注册在 `E:\LEON\小说` 项目级 opencode 配置**（非本仓库）；完整用法见全局 skill `genai-image-patcher`。
-- 契约要点：所有工具返回**字符串**（成功为 JSON，失败以 `Error: ` 前缀）；`generate` **阻塞至完成才返回**（结果含 `processingState`：DONE=正常 / IDLE=出错或被停止；单次最长 10 分钟），客户端**无需轮询**；`get_full_image`/`get_region_patch` 返回带 `kind`；blob URL 出不了浏览器，取图必须走工具（base64 经 WS 中转）。
+- 契约要点：所有操作工具返回**字符串**（成功为 JSON，失败以 `Error: ` 前缀）；`generate` **阻塞至完成才返回**（结果含 `processingState`：DONE=正常 / IDLE=出错或被停止；单次最长 10 分钟），客户端**无需轮询**；`get_full_image`/`get_region_patch` 返回带 `kind`；blob URL 出不了浏览器，取图必须走工具（base64 经 WS 中转）。
+- **Codex 内置浏览器（2026-08-26）**：MCP 工具只负责启动/连接 Vite、bridge 和本地工作台；Agent 使用 Codex 内置浏览器打开 `http://127.0.0.1:3000`，完整画布在该页面操作。不注册 MCP UI 资源；不要恢复 `render_patcher_widget` 或 `mcp/patcher_widget.html`。
 - 快照字段：`generationSeq`、`updatedAt`（变化=状态变动需重读 id）、region `errorMessage`、image `referenceOrder`。
 - **参考图校准门禁（2026-08-17 新增，勿削弱）**：`bridge/server.mjs` 内 `calibration` 状态 + `gateGenerate()`。`generate` 前必须已 `review_references` 校准且签名一致，否则返回 `REFERENCE_CALIBRATION_REQUIRED`。**校准是一次性的**——每次 `generate`（成败皆然）通过门禁后即 `calibration=null`，强制下次生图重新评估参考图（防"上轮参考图沿用进不同任务"）。签名 = 按 `referenceOrder` 升序的参考图 id 列表（`refSignature()`，与 `mcp/server.py` 的 `_refs_sorted` 必须一致）。`set_calibration` 是 bridge 本地命令（不经 WS 转发），`/state` 暴露 `calibration.current` 供 `get_status` 读取。改门禁逻辑必须同步 `E:\LEON\pi-agent-development\LEON_ArtistAgent\mcp-servers\bridge\server.mjs` 与两份 `mcp/server.py`。
 
 ## 环境注意事项（本机）
 
-- **IOPaint**：装在本机 conda `llm` 环境（`d:\anaconda3\envs\llm`，不在 PATH）；`anime-lama` 模型已缓存（`~/.cache/torch/hub/checkpoints/anime-manga-big-lama.pt`）。应用通过 `config.iopaintUrl`（默认 `http://127.0.0.1:8080`，`services/iopaintService.ts`）调用"本地移除"，**无后端、浏览器无法拉起外部进程**，只能独立启动。已加 `predev` 钩子（`scripts/start-iopaint.ps1`）：`npm run dev` 时幂等拉起——8080 已监听则跳过，否则后台启动并等端口（最多 60s，首启可能下载模型），永不阻塞 vite（exit 0）。日志在 `%LOCALAPPDATA%\iopaint\`。
+- **IOPaint**：装在本机 conda `llm` 环境（`d:\anaconda3\envs\llm`，不在 PATH）；`anime-lama` 模型已缓存（`~/.cache/torch/hub/checkpoints/anime-manga-big-lama.pt`）。应用通过 `config.iopaintUrl`（默认 `http://127.0.0.1:8080`，`services/iopaintService.ts`）调用"本地移除"，**无后端、浏览器无法拉起外部进程**，只能独立启动。已加 `predev` 钩子（`scripts/start-iopaint.ps1`）：`npm run dev` 时先快速探测 8080，未就绪则后台启动 IOPaint 后立即退出，Vite 不等待模型加载；日志在 `%LOCALAPPDATA%\iopaint\`。`start-patcher.ps1` 另用 Windows 用户级互斥保护 Vite 3000 的并发启动；MCP 操作工具在 Vite 可访问且 bridge `appConnected` 后才算应用就绪，未连接时由 Agent 打开 Codex 内置浏览器；IOPaint 不属于 MCP 启动就绪条件。
 - **HTTP_PROXY（127.0.0.1:7897）会破坏 PowerShell 的 `Invoke-RestMethod` 访问 127.0.0.1**（返回 502）——调试桥接用 Node fetch/curl 或先清代理变量；Python httpx 调用本机桥接需 `trust_env=False`。
 - Python MCP 依赖：**`mcp>=1.0,<2`**（2.x 移除了 `FastMCP`，API 不兼容）；桥接 Node 依赖仅 `ws`。
 - 本机环境有 OPENAI_API_KEY 占位（6 位），真实 key 在 opencode.json 的 grsai-mcp 配置里。

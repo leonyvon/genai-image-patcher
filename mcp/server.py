@@ -1,9 +1,10 @@
-"""MCP server for genai-image-patcher bridge.
+"""MCP server for genai-image-patcher bridge and local workbench.
 
 Coding agents use these tools to drive the browser app: read state, upload
 images, mark reference images, write prompts, trigger generation and retrieve
-results. Requires the Node bridge (bridge/server.mjs) to be reachable; this
-server attempts to spawn it from the repo if it is not running.
+results. The first tool call starts the Vite workbench and Node bridge when
+needed. The agent opens the workbench URL in Codex's in-app browser, which then
+connects the browser WebSocket used by these tools.
 """
 
 import atexit
@@ -21,38 +22,133 @@ from mcp.server.fastmcp import FastMCP
 BRIDGE_URL = os.environ.get("GENAI_BRIDGE_URL", "http://127.0.0.1:3100")
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BRIDGE_SCRIPT = REPO_ROOT / "bridge" / "server.mjs"
+PATCHER_URL = os.environ.get("GENAI_PATCHER_URL", "http://127.0.0.1:3000")
+
+
+def _find_patcher_root() -> Path:
+    """Find the workbench source, supporting standalone and plugin layouts."""
+    configured = os.environ.get("GENAI_PATCHER_ROOT")
+    candidates: list[Path] = []
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    # Local LEON checkout fallback for the installed personal plugin cache.
+    candidates.append(Path(r"E:\LEON\genai-image-patcher"))
+
+    # Standalone checkout, a plugin apps/ checkout, or a sibling checkout.
+    candidates.extend([REPO_ROOT, REPO_ROOT / "apps" / "genai-image-patcher"])
+    ancestor = REPO_ROOT
+    for _ in range(6):
+        candidates.append(ancestor / "genai-image-patcher")
+        candidates.append(ancestor / "apps" / "genai-image-patcher")
+        ancestor = ancestor.parent
+
+    for candidate in candidates:
+        if (candidate / "scripts" / "start-patcher.ps1").is_file():
+            return candidate.resolve()
+    return Path(configured).expanduser().resolve() if configured else REPO_ROOT
+
+
+PATCHER_ROOT = _find_patcher_root()
+PATCHER_START_SCRIPT = PATCHER_ROOT / "scripts" / "start-patcher.ps1"
 
 mcp = FastMCP("genai-bridge")
 _bridge_proc: subprocess.Popen | None = None
+_patcher_proc: subprocess.Popen | None = None
 
 
-def _ensure_bridge() -> bool:
-    """Return True if the bridge is reachable, spawning it when needed."""
+def _patcher_reachable() -> bool:
+    try:
+        response = httpx.get(PATCHER_URL, timeout=2, trust_env=False)
+        return response.status_code == 200 and "GenAI Patcher" in response.text
+    except Exception:
+        return False
+
+
+def _launch_patcher() -> bool:
+    """Launch the Windows workbench helper; it backgrounds Vite and returns."""
+    global _patcher_proc
+    if not PATCHER_START_SCRIPT.is_file():
+        return False
+    if _patcher_proc and _patcher_proc.poll() is None:
+        return True
+    args = [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(PATCHER_START_SCRIPT),
+    ]
+    try:
+        _patcher_proc = subprocess.Popen(
+            args,
+            cwd=str(PATCHER_ROOT),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _ensure_patcher() -> bool:
+    if _patcher_reachable():
+        return True
+    if not _launch_patcher():
+        return False
+    for _ in range(120):
+        if _patcher_reachable():
+            return True
+        # Do not wait the full window when the helper has already exited with
+        # an error (for example, a failed npm/Vite launch).
+        if _patcher_proc and _patcher_proc.poll() is not None:
+            return False
+        time.sleep(1)
+    return False
+
+
+def _bridge_app_connected() -> bool:
+    try:
+        response = httpx.get(f"{BRIDGE_URL}/health", timeout=2, trust_env=False)
+        return response.status_code == 200 and bool(response.json().get("appConnected"))
+    except Exception:
+        return False
+
+
+def _bridge_reachable() -> bool:
     try:
         return httpx.get(f"{BRIDGE_URL}/health", timeout=2, trust_env=False).status_code == 200
     except Exception:
-        pass
+        return False
+
+
+def _ensure_bridge(require_app: bool = True) -> bool:
+    """Ensure local services are ready, optionally requiring the app socket."""
+    if not _ensure_patcher():
+        return False
     global _bridge_proc
-    node = shutil.which("node")
-    if not node or not BRIDGE_SCRIPT.is_file():
-        return False
-    try:
-        _bridge_proc = subprocess.Popen(
-            [node, str(BRIDGE_SCRIPT)],
-            cwd=str(REPO_ROOT),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception:
-        return False
-    for _ in range(25):
+    if not _bridge_reachable():
+        node = shutil.which("node")
+        if not node or not BRIDGE_SCRIPT.is_file():
+            return False
         try:
-            if httpx.get(f"{BRIDGE_URL}/health", timeout=1, trust_env=False).status_code == 200:
-                return True
+            _bridge_proc = subprocess.Popen(
+                [node, str(BRIDGE_SCRIPT)],
+                cwd=str(REPO_ROOT),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         except Exception:
-            pass
-        time.sleep(0.2)
-    return False
+            return False
+        for _ in range(25):
+            if _bridge_reachable():
+                break
+            time.sleep(0.2)
+        else:
+            return False
+
+    return not require_app or _bridge_app_connected()
 
 
 def _get() -> dict:
@@ -94,12 +190,29 @@ def _refs_sorted(state: dict) -> list[str]:
 @mcp.tool()
 def get_status() -> str:
     """获取应用当前状态：连接状态、处理进度、图库图片列表（含选区与提示词）、配置摘要。"""
-    if not _ensure_bridge():
-        return _err(f"桥接服务不可达（{BRIDGE_URL}）。请先运行 npm run dev 启动应用。")
+    if not _ensure_bridge(require_app=False):
+        return _err(f"本地服务未能自动启动（前端 {PATCHER_URL}，桥接 {BRIDGE_URL}）。请检查本地 Node/npm 与启动日志。")
+    if not _bridge_app_connected():
+        return _err(f"工作台已启动但尚未连接浏览器，请在 Codex 内置浏览器打开 {PATCHER_URL}，然后重试 get_status。")
     try:
         return _ok(_get())
     except Exception as e:
         return _err(str(e))
+
+
+@mcp.tool()
+def start_patcher() -> str:
+    """确保本地服务就绪，并返回供 agent 在 Codex 内置浏览器打开的工作台 URL。"""
+    if not _ensure_bridge(require_app=False):
+        return _err(f"修图工作台未能自动启动（前端 {PATCHER_URL}，桥接 {BRIDGE_URL}）。")
+    app_connected = _bridge_app_connected()
+    return _ok({
+        "started": True,
+        "url": PATCHER_URL,
+        "bridgeUrl": BRIDGE_URL,
+        "appConnected": app_connected,
+        "openInCodexBrowser": not app_connected,
+    })
 
 
 @mcp.tool()
